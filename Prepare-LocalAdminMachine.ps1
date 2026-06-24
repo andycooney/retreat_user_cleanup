@@ -1,4 +1,4 @@
-# Script version: 2026-06-24-v31-retreat-folder-root
+# Script version: 2026-06-24-v32-wallpaper-cache-bust-no-ip
 #requires -RunAsAdministrator
 <#
 Purpose:
@@ -2120,6 +2120,45 @@ function Get-ComputerNameForWallpaper {
     return $env:COMPUTERNAME
 }
 
+
+function Clear-RetreatWallpaperCache {
+    param(
+        [string]$CurrentWallpaperPath
+    )
+
+    Write-Log "Clearing Windows wallpaper cache and old retreat wallpaper files."
+
+    $pathsToRemove = @(
+        (Join-Path $env:APPDATA "Microsoft\Windows\Themes\TranscodedWallpaper"),
+        (Join-Path $env:APPDATA "Microsoft\Windows\Themes\Transcoded_000"),
+        (Join-Path $env:APPDATA "Microsoft\Windows\Themes\CachedFiles")
+    )
+
+    foreach ($path in $pathsToRemove) {
+        try {
+            if (Test-Path $path) {
+                Remove-Item -Path $path -Force -Recurse -ErrorAction SilentlyContinue
+                Write-Log "Removed wallpaper cache path: $path"
+            }
+        }
+        catch {
+            Write-Log "Could not remove wallpaper cache path ${path}: $($_.Exception.Message)"
+        }
+    }
+
+    try {
+        Get-ChildItem -Path "C:\Temp" -Filter "retreat-system-info-wallpaper*.jpg" -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -ne $CurrentWallpaperPath } |
+            ForEach-Object {
+                Remove-Item -Path $_.FullName -Force -ErrorAction SilentlyContinue
+                Write-Log "Removed old generated retreat wallpaper file: $($_.FullName)"
+            }
+    }
+    catch {
+        Write-Log "Could not remove old retreat wallpaper files: $($_.Exception.Message)"
+    }
+}
+
 function Apply-RetreatInfoWallpaper {
     param(
         [Parameter(Mandatory = $true)]
@@ -2134,6 +2173,7 @@ function Apply-RetreatInfoWallpaper {
     }
 
     $success = $true
+    Clear-RetreatWallpaperCache -CurrentWallpaperPath $WallpaperPath
     $desktopPath = "HKCU:\Control Panel\Desktop"
     $policyPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies\System"
     $contentPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager"
@@ -2215,13 +2255,14 @@ public class RetreatWallpaperTools {
 function New-RetreatInfoWallpaper {
     Write-Log "Generating system-information wallpaper."
 
-    $wallpaperPath = "C:\Temp\retreat-system-info-wallpaper.jpg"
+    $wallpaperPath = "C:\Temp\retreat-system-info-wallpaper-v32.jpg"
     $wallpaperFolder = Split-Path -Path $wallpaperPath -Parent
     if (-not (Test-Path $wallpaperFolder)) {
         New-Item -Path $wallpaperFolder -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
     }
 
-    # Remove any previous generated wallpaper so older builds with IP address text cannot remain cached.
+    # Remove previous generated retreat wallpapers and Windows cached wallpaper transcodes so older builds with IP address text cannot remain cached.
+    Clear-RetreatWallpaperCache -CurrentWallpaperPath $wallpaperPath
     Remove-Item -Path $wallpaperPath -Force -ErrorAction SilentlyContinue
 
     try {
@@ -2418,7 +2459,7 @@ catch {
 # Re-apply after Explorer restart request in case shell policy/Spotlight rewrote the desktop settings during cleanup.
 try {
     Start-Sleep -Seconds 2
-    $wallpaperPath = Join-Path "C:\Temp" "retreat-system-info-wallpaper.jpg"
+    $wallpaperPath = Join-Path "C:\Temp" "retreat-system-info-wallpaper-v32.jpg"
     Apply-RetreatInfoWallpaper -WallpaperPath $wallpaperPath | Out-Null
 }
 catch {
