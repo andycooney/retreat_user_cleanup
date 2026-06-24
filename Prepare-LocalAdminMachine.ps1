@@ -1,4 +1,4 @@
-# Script version: 2026-06-24-v26-verify-full-roboto-family
+# Script version: 2026-06-24-v27-force-generated-wallpaper
 #requires -RunAsAdministrator
 <#
 Purpose:
@@ -2115,6 +2115,98 @@ function Get-ComputerNameForWallpaper {
     return $env:COMPUTERNAME
 }
 
+function Apply-RetreatInfoWallpaper {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$WallpaperPath
+    )
+
+    Write-Log "Applying generated wallpaper explicitly: $WallpaperPath"
+
+    if (-not (Test-Path $WallpaperPath)) {
+        Write-Log "Wallpaper file does not exist, cannot apply: $WallpaperPath"
+        return $false
+    }
+
+    $success = $true
+    $desktopPath = "HKCU:\Control Panel\Desktop"
+    $policyPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies\System"
+    $contentPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager"
+
+    try {
+        $null = Set-RegistryStringValue -Path $desktopPath -Name "Wallpaper" -Value $WallpaperPath
+        $null = Set-RegistryStringValue -Path $desktopPath -Name "WallpaperStyle" -Value "10"
+        $null = Set-RegistryStringValue -Path $desktopPath -Name "TileWallpaper" -Value "0"
+    }
+    catch {
+        Write-Log "PowerShell wallpaper registry write failed: $($_.Exception.Message)"
+        $success = $false
+    }
+
+    try {
+        & reg.exe add "HKCU\Control Panel\Desktop" /v Wallpaper /t REG_SZ /d $WallpaperPath /f | Out-Null
+        & reg.exe add "HKCU\Control Panel\Desktop" /v WallpaperStyle /t REG_SZ /d 10 /f | Out-Null
+        & reg.exe add "HKCU\Control Panel\Desktop" /v TileWallpaper /t REG_SZ /d 0 /f | Out-Null
+    }
+    catch {
+        Write-Log "reg.exe wallpaper registry fallback failed: $($_.Exception.Message)"
+        $success = $false
+    }
+
+    # Force the generated wallpaper through the per-user policy path as well. This is intentional for a managed retreat/kiosk profile.
+    try {
+        $null = Set-RegistryStringValue -Path $policyPath -Name "Wallpaper" -Value $WallpaperPath
+        $null = Set-RegistryStringValue -Path $policyPath -Name "WallpaperStyle" -Value "4"
+        & reg.exe add "HKCU\Software\Microsoft\Windows\CurrentVersion\Policies\System" /v Wallpaper /t REG_SZ /d $WallpaperPath /f | Out-Null
+        & reg.exe add "HKCU\Software\Microsoft\Windows\CurrentVersion\Policies\System" /v WallpaperStyle /t REG_SZ /d 4 /f | Out-Null
+    }
+    catch {
+        Write-Log "Could not set wallpaper policy fallback: $($_.Exception.Message)"
+    }
+
+    # Keep Spotlight/active content from immediately replacing the generated wallpaper.
+    try {
+        $null = Set-RegistryDWordValue -Path $contentPath -Name "RotatingLockScreenEnabled" -Value 0
+        $null = Set-RegistryDWordValue -Path $contentPath -Name "RotatingLockScreenOverlayEnabled" -Value 0
+        $null = Set-RegistryDWordValue -Path $contentPath -Name "ContentDeliveryAllowed" -Value 0
+        $null = Set-RegistryDWordValue -Path $contentPath -Name "SubscribedContent-338388Enabled" -Value 0
+        $null = Set-RegistryDWordValue -Path $contentPath -Name "SubscribedContent-338389Enabled" -Value 0
+        $null = Set-RegistryDWordValue -Path $contentPath -Name "SubscribedContent-338393Enabled" -Value 0
+        $null = Set-RegistryDWordValue -Path $contentPath -Name "SubscribedContent-353698Enabled" -Value 0
+    }
+    catch {
+        Write-Log "Could not reinforce Spotlight disablement before wallpaper apply: $($_.Exception.Message)"
+    }
+
+    try {
+        Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+public class RetreatWallpaperTools {
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool SystemParametersInfo(int uAction, int uParam, string lpvParam, int fuWinIni);
+}
+"@ -ErrorAction SilentlyContinue
+        $spiResult = [RetreatWallpaperTools]::SystemParametersInfo(20, 0, $WallpaperPath, 3)
+        Write-Log "SystemParametersInfo wallpaper apply returned: $spiResult"
+        if (-not $spiResult) { $success = $false }
+    }
+    catch {
+        Write-Log "Could not immediately apply generated wallpaper with SystemParametersInfo: $($_.Exception.Message)"
+        $success = $false
+    }
+
+    try {
+        Start-Process -FilePath rundll32.exe -ArgumentList "user32.dll,UpdatePerUserSystemParameters" -WindowStyle Hidden -Wait -ErrorAction SilentlyContinue
+        Write-Log "Requested UpdatePerUserSystemParameters refresh."
+    }
+    catch {
+        Write-Log "Could not run UpdatePerUserSystemParameters refresh: $($_.Exception.Message)"
+    }
+
+    return $success
+}
+
 function New-RetreatInfoWallpaper {
     Write-Log "Generating system-information wallpaper."
 
@@ -2156,6 +2248,9 @@ function New-RetreatInfoWallpaper {
         $osCaption = if ($os.Caption) { $os.Caption.Trim() } else { "Unavailable" }
         $ip = Get-PrimaryIPv4AddressForWallpaper
         $fontName = Get-PreferredWallpaperFontName
+
+        Write-Log "Wallpaper target file: $wallpaperPath"
+        Write-Log "Wallpaper canvas: ${width}x${height}; font: $fontName"
 
         $bitmap = New-Object System.Drawing.Bitmap($width, $height)
         $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
@@ -2224,27 +2319,22 @@ function New-RetreatInfoWallpaper {
         $valueFont.Dispose()
         $smallFont.Dispose()
 
-        $desktopPath = "HKCU:\Control Panel\Desktop"
-        $null = Set-RegistryStringValue -Path $desktopPath -Name "Wallpaper" -Value $wallpaperPath
-        $null = Set-RegistryStringValue -Path $desktopPath -Name "WallpaperStyle" -Value "10"
-        $null = Set-RegistryStringValue -Path $desktopPath -Name "TileWallpaper" -Value "0"
-
-        try {
-            Add-Type -TypeDefinition @"
-using System;
-using System.Runtime.InteropServices;
-public class RetreatWallpaperTools {
-    [DllImport("user32.dll", SetLastError = true)]
-    public static extern bool SystemParametersInfo(int uAction, int uParam, string lpvParam, int fuWinIni);
-}
-"@ -ErrorAction SilentlyContinue
-            [RetreatWallpaperTools]::SystemParametersInfo(20, 0, $wallpaperPath, 3) | Out-Null
+        if (Test-Path $wallpaperPath) {
+            $size = (Get-Item $wallpaperPath).Length
+            Write-Log "Wallpaper file created: $wallpaperPath ($size bytes)"
         }
-        catch {
-            Write-Log "Could not immediately apply generated wallpaper: $($_.Exception.Message)"
+        else {
+            Write-Log "Wallpaper file was not created: $wallpaperPath"
+            return
         }
 
-        Write-Log "Generated and applied wallpaper: $wallpaperPath"
+        $applied = Apply-RetreatInfoWallpaper -WallpaperPath $wallpaperPath
+        if ($applied) {
+            Write-Log "Generated and applied wallpaper: $wallpaperPath"
+        }
+        else {
+            Write-Log "Generated wallpaper but one or more apply methods reported failure: $wallpaperPath"
+        }
     }
     catch {
         Write-Log "Could not generate wallpaper: $($_.Exception.Message)"
@@ -2321,6 +2411,15 @@ try {
 }
 catch {
     Write-Log "Could not restart Explorer: $($_.Exception.Message)"
+}
+
+# Re-apply after Explorer restart request in case shell policy/Spotlight rewrote the desktop settings during cleanup.
+try {
+    Start-Sleep -Seconds 2
+    Apply-RetreatInfoWallpaper -WallpaperPath "C:\Tempetreat-system-info-wallpaper.jpg" | Out-Null
+}
+catch {
+    Write-Log "Could not re-apply wallpaper after Explorer restart: $($_.Exception.Message)"
 }
 
 Write-Log "Elevated user/profile provisioning complete. Spotify Startup trigger remains only if Spotify is not installed."

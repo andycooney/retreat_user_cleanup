@@ -1,4 +1,4 @@
-# Prepare-LocalAdminMachine-v26.ps1
+# Prepare-LocalAdminMachine-v27.ps1
 
 PowerShell provisioning script for preparing a Windows computer for a local `retreat`-style administrator/autologon user profile.
 
@@ -11,13 +11,37 @@ This script is designed for kiosk, presentation, event, retreat, or shared-use m
 ## Current version
 
 ```text
-Prepare-LocalAdminMachine-v26.ps1
+Prepare-LocalAdminMachine-v27.ps1
 ```
 
 Matching README:
 
 ```text
-README-Prepare-LocalAdminMachine-v26.md
+README-Prepare-LocalAdminMachine-v27.md
+```
+
+---
+
+## v27 wallpaper reliability update
+
+Version v27 strengthens the generated desktop wallpaper step. It now:
+
+- Logs the target wallpaper path, canvas size, selected font, and generated file size.
+- Writes the wallpaper setting to both the normal per-user desktop registry keys and a per-user wallpaper policy fallback.
+- Uses `SystemParametersInfo` plus `UpdatePerUserSystemParameters` to force Windows to reload the wallpaper immediately.
+- Reapplies the generated wallpaper after the Explorer restart request so Spotlight or shell refreshes are less likely to replace it.
+- Keeps Spotlight/active-content disablement reinforced immediately before applying the generated wallpaper.
+
+The generated wallpaper path remains:
+
+```text
+C:\Temp\retreat-system-info-wallpaper.jpg
+```
+
+The first-logon/user-context log path remains:
+
+```text
+C:\Temp\first-logon-<username>.log
 ```
 
 ---
@@ -28,7 +52,7 @@ README-Prepare-LocalAdminMachine-v26.md
 Set-ExecutionPolicy Bypass -Scope Process -Force
 
 powershell.exe -NoProfile -ExecutionPolicy Bypass `
-  -File "$env:USERPROFILE\Downloads\Prepare-LocalAdminMachine-v26.ps1" `
+  -File "$env:USERPROFILE\Downloads\Prepare-LocalAdminMachine-v27.ps1" `
   -LocalAdminUser "retreat" `
   -LocalAdminPassword "YourPasswordHere"
 ```
@@ -39,7 +63,7 @@ With a computer rename:
 Set-ExecutionPolicy Bypass -Scope Process -Force
 
 powershell.exe -NoProfile -ExecutionPolicy Bypass `
-  -File "$env:USERPROFILE\Downloads\Prepare-LocalAdminMachine-v26.ps1" `
+  -File "$env:USERPROFILE\Downloads\Prepare-LocalAdminMachine-v27.ps1" `
   -LocalAdminUser "retreat" `
   -LocalAdminPassword "YourPasswordHere" `
   -NewComputerName "RETREAT-001"
@@ -51,7 +75,7 @@ Optional domain-unjoin credential:
 $cred = Get-Credential
 
 powershell.exe -NoProfile -ExecutionPolicy Bypass `
-  -File "$env:USERPROFILE\Downloads\Prepare-LocalAdminMachine-v26.ps1" `
+  -File "$env:USERPROFILE\Downloads\Prepare-LocalAdminMachine-v27.ps1" `
   -LocalAdminUser "retreat" `
   -LocalAdminPassword "YourPasswordHere" `
   -DomainUnjoinCredential $cred
@@ -464,7 +488,7 @@ Get-ChildItem C:\Windows\Fonts\Roboto* -ErrorAction SilentlyContinue |
     Select-Object Name, Length
 ```
 
-v26 does not skip Roboto installation merely because the `Roboto` family name exists. It checks for a complete variable-font pair or the core static weights before considering the family complete.
+v27 does not skip Roboto installation merely because the `Roboto` family name exists. It checks for a complete variable-font pair or the core static weights before considering the family complete.
 
 ### Check first-logon/user-context log
 
@@ -491,6 +515,20 @@ Select-Object DisplayName, DisplayVersion, Publisher
 When this script is iterated, keep the script and README versions in sync. For example:
 
 ```text
-Prepare-LocalAdminMachine-v26.ps1
-README-Prepare-LocalAdminMachine-v26.md
+Prepare-LocalAdminMachine-v27.ps1
+README-Prepare-LocalAdminMachine-v27.md
 ```
+
+
+## v27 notes
+
+If the wallpaper still does not show after running v27, check:
+
+```powershell
+Test-Path C:\Temp\retreat-system-info-wallpaper.jpg
+Get-Content C:\Temp\first-logon-retreat.log -Tail 80
+reg query "HKCU\Control Panel\Desktop" /v Wallpaper
+reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\Policies\System" /v Wallpaper
+```
+
+A sign out/sign in or reboot may still be needed on some Windows 11 builds if Explorer or policy refresh delays the visible desktop update.
