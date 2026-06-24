@@ -311,6 +311,45 @@ function Invoke-SilentUninstall {
     }
 }
 
+function Disable-And-RequestStopServiceFast {
+    param(
+        [Parameter(Mandatory)]
+        [string]$ServiceName,
+        [string]$DisplayName = $ServiceName
+    )
+
+    try {
+        Write-Host "Disabling service without waiting: $DisplayName ($ServiceName)"
+        Start-Process sc.exe -ArgumentList @("config", $ServiceName, "start=", "disabled") -Wait -NoNewWindow | Out-Null
+    }
+    catch {
+        Write-Warning "Could not disable service ${ServiceName}: $($_.Exception.Message)"
+    }
+
+    try {
+        Write-Host "Requesting service stop without waiting: $DisplayName ($ServiceName)"
+        Start-Process sc.exe -ArgumentList @("stop", $ServiceName) -Wait -NoNewWindow | Out-Null
+    }
+    catch {
+        Write-Warning "Could not request stop for service ${ServiceName}: $($_.Exception.Message)"
+    }
+}
+
+function Delete-ServiceFast {
+    param(
+        [Parameter(Mandatory)]
+        [string]$ServiceName
+    )
+
+    try {
+        Start-Process sc.exe -ArgumentList @("delete", $ServiceName) -Wait -NoNewWindow | Out-Null
+        Write-Host "Requested service deletion: $ServiceName"
+    }
+    catch {
+        Write-Warning "Could not request deletion for service ${ServiceName}: $($_.Exception.Message)"
+    }
+}
+
 
 function Disable-And-RemoveThreatLockerRemnants {
     Write-Step "Disabling and removing ThreatLocker remnants if present"
@@ -335,11 +374,9 @@ function Disable-And-RemoveThreatLockerRemnants {
         ForEach-Object {
             $foundSomething = $true
             try {
-                Write-Host "Stopping/disabling ThreatLocker service: $($_.Name)"
-                Stop-Service -Name $_.Name -Force -ErrorAction SilentlyContinue
-                Set-Service -Name $_.Name -StartupType Disabled -ErrorAction SilentlyContinue
-                Start-Process sc.exe -ArgumentList @("delete", $_.Name) -Wait -NoNewWindow | Out-Null
-                Write-Host "Requested service deletion: $($_.Name)"
+                Write-Host "Disabling/deleting ThreatLocker service without waiting: $($_.Name)"
+                Disable-And-RequestStopServiceFast -ServiceName $_.Name -DisplayName $_.DisplayName
+                Delete-ServiceFast -ServiceName $_.Name
             }
             catch {
                 Write-Warning "Could not disable/delete ThreatLocker service $($_.Name): $($_.Exception.Message)"
@@ -436,8 +473,7 @@ function Remove-SecurityAndVpnApps {
             Where-Object { $_.DisplayName -like $pattern -or $_.Name -like $pattern } |
             ForEach-Object {
                 try {
-                    Stop-Service -Name $_.Name -Force -ErrorAction SilentlyContinue
-                    Write-Host "Stopped service: $($_.DisplayName)"
+                    Disable-And-RequestStopServiceFast -ServiceName $_.Name -DisplayName $_.DisplayName
                 }
                 catch {
                     Write-Warning "Could not stop service $($_.DisplayName): $($_.Exception.Message)"

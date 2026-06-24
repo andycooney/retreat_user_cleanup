@@ -1,4 +1,4 @@
-# Prepare-LocalAdminMachine-v18.ps1
+# Prepare-LocalAdminMachine-v21.ps1
 
 PowerShell provisioning script for preparing a Windows computer for a local `retreat`-style administrator/autologon user profile.
 
@@ -11,7 +11,7 @@ This script is designed for kiosk, presentation, event, retreat, or shared-use m
 ## Current version
 
 ```text
-Prepare-LocalAdminMachine-v18.ps1
+Prepare-LocalAdminMachine-v21.ps1
 ```
 
 ---
@@ -22,7 +22,7 @@ Prepare-LocalAdminMachine-v18.ps1
 Set-ExecutionPolicy Bypass -Scope Process -Force
 
 powershell.exe -NoProfile -ExecutionPolicy Bypass `
-  -File "$env:USERPROFILE\Downloads\Prepare-LocalAdminMachine-v18.ps1" `
+  -File "$env:USERPROFILE\Downloads\Prepare-LocalAdminMachine-v21.ps1" `
   -LocalAdminUser "retreat" `
   -LocalAdminPassword "YourPasswordHere"
 ```
@@ -33,7 +33,7 @@ Optional domain-unjoin credential:
 $cred = Get-Credential
 
 powershell.exe -NoProfile -ExecutionPolicy Bypass `
-  -File "$env:USERPROFILE\Downloads\Prepare-LocalAdminMachine-v18.ps1" `
+  -File "$env:USERPROFILE\Downloads\Prepare-LocalAdminMachine-v21.ps1" `
   -LocalAdminUser "retreat" `
   -LocalAdminPassword "YourPasswordHere" `
   -DomainUnjoinCredential $cred
@@ -68,7 +68,7 @@ The script has two phases:
 2. **First-logon/user phase**  
    A second script is staged under `C:\ProgramData\DeltaProvisioning` and runs in the target user's context. This handles per-user settings that do not reliably apply from another account or from an elevated/system context.
 
-If the bootstrap script is already being run as the target user, it runs the first-logon script immediately after the bootstrap phase completes. If not, it stages a Startup trigger so the first-logon script runs when the target user next signs in.
+If the bootstrap script is already being run as the target user, it creates and starts a least-privilege scheduled task so the first-logon script runs as the regular interactive user rather than inside the elevated Administrator process. If that user-context run cannot complete, the Startup trigger remains in place and retries at the next normal sign-in. If the bootstrap is not being run as the target user, it stages the Startup trigger so the first-logon script runs when the target user next signs in.
 
 ---
 
@@ -82,9 +82,10 @@ C:\ProgramData\DeltaProvisioning\FirstLogon-For-<username>.ps1
 C:\ProgramData\DeltaProvisioning\first-logon-<username>.log
 C:\ProgramData\DeltaProvisioning\TaskbarLayout-<username>.xml
 C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Startup\Run-FirstLogon-Provisioning-For-<username>.cmd
+Scheduled task: \DeltaProvisioning\DeltaProvisioning-FirstLogon-<username>
 ```
 
-The Startup trigger is removed after successful first-logon provisioning.
+The Startup trigger is removed only after successful first-logon provisioning. When the bootstrap is run as the target user, the scheduled task is used to run the first-logon script as that regular interactive user with least privilege.
 
 ---
 
@@ -167,10 +168,13 @@ Attempts to stop, disable, uninstall, or remove remnants of:
 For ThreatLocker specifically, the script attempts to:
 
 - Stop ThreatLocker processes.
-- Stop and disable ThreatLocker services.
+- Disable ThreatLocker services.
+- Request service stop/delete using `sc.exe` without waiting indefinitely.
 - Delete ThreatLocker services using `sc delete`.
 - Rename ThreatLocker folders to `.disabled`.
 - Remove ThreatLocker registry keys where accessible.
+
+Version 21 intentionally avoids blocking `Stop-Service` waits because partly removed ThreatLocker service entries can remain in a stuck stopping/deleted state.
 
 > **Limit:** If ThreatLocker tamper protection is active, full removal may require the ThreatLocker portal or vendor-approved uninstall method.
 
@@ -251,7 +255,7 @@ The script also sets Explorer's built-in `LaunchTo` preference where supported, 
 - Checks whether Spotify is already installed.
 - If not installed, attempts to install it using `winget` in the target user's context.
 
-Spotify is intentionally handled in the first-logon/user phase because per-user app installs often do not behave correctly from an elevated bootstrap context.
+Spotify is intentionally handled in the first-logon/user phase because per-user app installs often do not behave correctly from an elevated bootstrap context. In v21, if the bootstrap is already running as the target user, Spotify is handled through a least-privilege scheduled task so it runs as the regular interactive user, not the elevated Administrator process. If Spotify is still not detected afterward, the Startup trigger remains so it retries at the next normal logon.
 
 ### Slido for PowerPoint
 
@@ -318,7 +322,7 @@ First-logon actions are logged to:
 C:\ProgramData\DeltaProvisioning\first-logon-<username>.log
 ```
 
-Review this log if taskbar, desktop, Chrome, Spotify, Slido, Teams, or user-interface cleanup does not apply as expected.
+Review this log if taskbar, desktop, Chrome, Spotify, Slido, Teams, or user-interface cleanup does not apply as expected. Also check Task Scheduler under `\DeltaProvisioning` for `DeltaProvisioning-FirstLogon-<username>` when troubleshooting the user-context run.
 
 ---
 
@@ -330,7 +334,8 @@ Review this log if taskbar, desktop, Chrome, Spotify, Slido, Teams, or user-inte
 4. Reboot.
 5. Confirm the machine autologs into the target user.
 6. Confirm the first-logon script runs or has already run.
-7. Confirm the desktop/taskbar layout after sign out/sign in or reboot.
+7. If running as `retreat`, confirm the least-privilege scheduled task starts the first-logon script.
+8. Confirm the desktop/taskbar layout after sign out/sign in or reboot.
 
 Example:
 
@@ -338,7 +343,7 @@ Example:
 Set-ExecutionPolicy Bypass -Scope Process -Force
 
 powershell.exe -NoProfile -ExecutionPolicy Bypass `
-  -File "$env:USERPROFILE\Downloads\Prepare-LocalAdminMachine-v18.ps1" `
+  -File "$env:USERPROFILE\Downloads\Prepare-LocalAdminMachine-v21.ps1" `
   -LocalAdminUser "retreat" `
   -LocalAdminPassword "YourPasswordHere"
 
@@ -355,13 +360,13 @@ Recommended method: download first, then run from disk.
 mkdir C:\Temp -Force
 
 Invoke-WebRequest `
-  -Uri "https://raw.githubusercontent.com/<owner>/<repo>/<tag-or-branch>/Prepare-LocalAdminMachine-v18.ps1" `
-  -OutFile "C:\Temp\Prepare-LocalAdminMachine-v18.ps1"
+  -Uri "https://raw.githubusercontent.com/<owner>/<repo>/<tag-or-branch>/Prepare-LocalAdminMachine-v21.ps1" `
+  -OutFile "C:\Temp\Prepare-LocalAdminMachine-v21.ps1"
 
 Set-ExecutionPolicy Bypass -Scope Process -Force
 
 powershell.exe -NoProfile -ExecutionPolicy Bypass `
-  -File "C:\Temp\Prepare-LocalAdminMachine-v18.ps1" `
+  -File "C:\Temp\Prepare-LocalAdminMachine-v21.ps1" `
   -LocalAdminUser "retreat" `
   -LocalAdminPassword "YourPasswordHere"
 ```
@@ -369,7 +374,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass `
 For a persistent URL, prefer a release tag instead of `main`:
 
 ```text
-https://raw.githubusercontent.com/<owner>/<repo>/v18/Prepare-LocalAdminMachine-v18.ps1
+https://raw.githubusercontent.com/<owner>/<repo>/v21/Prepare-LocalAdminMachine-v21.ps1
 ```
 
 ---
@@ -390,7 +395,7 @@ Modern Windows builds restrict direct taskbar pinning. The script uses taskbar l
 
 ### ThreatLocker
 
-ThreatLocker may have tamper protection. Full removal may require portal authorization or vendor-approved removal tooling.
+ThreatLocker may have tamper protection. Full removal may require portal authorization or vendor-approved removal tooling. v21 avoids waiting indefinitely on stuck services, but local cleanup still cannot bypass tamper protection.
 
 ### Duo Windows Logon
 
@@ -432,8 +437,8 @@ After reboot/sign-in, verify:
 - Increment the script filename each time it is changed, for example:
 
 ```text
-Prepare-LocalAdminMachine-v19.ps1
-Prepare-LocalAdminMachine-v20.ps1
+Prepare-LocalAdminMachine-v21.ps1
+Prepare-LocalAdminMachine-v21.ps1
 ```
 
 - Keep the README version aligned with the script version.
