@@ -1,4 +1,4 @@
-# Script version: 2026-06-23-v17-hello-desktop-chrome-taskbar
+# Script version: 2026-06-23-v19-defer-spotify-to-normal-logon
 #requires -RunAsAdministrator
 <#
 Purpose:
@@ -8,7 +8,7 @@ Purpose:
 - Unjoin domain if domain joined
 - Disable startup items, including Teams and OneDrive startup hooks
 - Remove Cisco AnyConnect / Cisco Secure Client, Duo Windows Logon, and ThreatLocker if present
-- Stage Spotify, Slido, and per-user UI cleanup to run at first target-user logon, and install Windows Media Player Legacy
+- Stage Spotify, Slido, Chrome, and per-user UI cleanup to run at the next normal non-elevated target-user logon, and install Windows Media Player Legacy
 - Disable screensaver
 - Apply machine policies for active content now; stage per-user taskbar/Spotlight/default-browser/taskbar-pin cleanup for first target-user logon; keep File Explorer pinned and pin PowerPoint, Windows Media Player Legacy, and Google Chrome
 - Create C:\retreat
@@ -969,6 +969,18 @@ function Test-AppInstalledByDisplayName {
     return $false
 }
 
+function Test-CurrentProcessIsElevated {
+    try {
+        $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+        $principal = New-Object Security.Principal.WindowsPrincipal($identity)
+        return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    }
+    catch {
+        Write-Log "Could not determine elevation state: $($_.Exception.Message)"
+        return $false
+    }
+}
+
 function Invoke-WingetInstallWithTimeout {
     param(
         [string]$PackageId,
@@ -1766,7 +1778,12 @@ Write-Log "First-logon provisioning started for $TargetUsername."
 Remove-EdgeDesktopShortcuts
 Disable-WindowsHelloAndSetupPromptsForCurrentUser
 Invoke-WingetInstallWithTimeout -PackageId "Google.Chrome" -FriendlyName "Google Chrome" -InstalledDisplayNamePattern "^Google Chrome" -Silent $true -TimeoutSeconds 1800
-Invoke-WingetInstallWithTimeout -PackageId "Spotify.Spotify" -FriendlyName "Spotify" -InstalledDisplayNamePattern "^Spotify" -Silent $true -TimeoutSeconds 1800
+if (Test-CurrentProcessIsElevated) {
+    Write-Log "Current process is elevated. Skipping Spotify because the Spotify installer must run as the regular interactive user. It will retry at the next normal logon if this Startup trigger remains."
+}
+else {
+    Invoke-WingetInstallWithTimeout -PackageId "Spotify.Spotify" -FriendlyName "Spotify" -InstalledDisplayNamePattern "^Spotify" -Silent $true -TimeoutSeconds 1800
+}
 Invoke-WingetInstallWithTimeout -PackageId "Slido.Slido" -FriendlyName "Slido for PowerPoint" -InstalledDisplayNamePattern "^Slido" -Silent $false -TimeoutSeconds 1800
 Set-ChromeDefaultBrowserBestEffort
 Reset-TaskbarPinsForProvisionedApps
@@ -1782,6 +1799,11 @@ try {
 }
 catch {
     Write-Log "Could not restart Explorer: $($_.Exception.Message)"
+}
+
+if (-not (Test-AppInstalledByDisplayName -DisplayNamePattern "^Spotify")) {
+    Write-Log "Spotify is still not installed. Leaving Startup trigger in place so it can retry at the next normal user logon."
+    exit 1
 }
 
 Write-Log "First-logon provisioning complete."
@@ -1810,14 +1832,9 @@ exit /b 0
 function Invoke-StagedFirstLogonIfCurrentUser {
     param([Parameter(Mandatory)][string]$Username)
 
-    Write-Step "Checking whether first-logon provisioning should run now"
+    Write-Step "Checking first-logon provisioning trigger"
 
     $currentUser = $env:USERNAME
-    if ($currentUser -ine $Username) {
-        Write-Host "Current user '$currentUser' is not target user '$Username'. First-logon provisioning will run when $Username logs in."
-        return
-    }
-
     $provisioningFolder = Join-Path $env:ProgramData "DeltaProvisioning"
     $startupFolder = Join-Path $env:ProgramData "Microsoft\Windows\Start Menu\Programs\Startup"
     $firstLogonScript = Join-Path $provisioningFolder "FirstLogon-For-$Username.ps1"
@@ -1825,33 +1842,52 @@ function Invoke-StagedFirstLogonIfCurrentUser {
     $logPath = Join-Path $provisioningFolder "first-logon-$Username.log"
 
     if (-not (Test-Path $firstLogonScript)) {
-        Write-Warning "First-logon script was not found at $firstLogonScript. It cannot be run immediately."
+        Write-Warning "First-logon script was not found at $firstLogonScript. It cannot run at next logon."
         return
     }
 
-    Write-Host "Already running as target user '$Username'. Running first-logon provisioning immediately."
+    if (-not (Test-Path $firstLogonCmd)) {
+        Write-Warning "First-logon Startup trigger was not found at $firstLogonCmd. Re-stage the script if user-context provisioning is needed."
+        return
+    }
 
-    try {
-        $process = Start-Process -FilePath "powershell.exe" `
-            -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $firstLogonScript, "-TargetUsername", $Username, "-LogPath", $logPath) `
-            -Wait `
-            -NoNewWindow `
-            -PassThru
+    if ($currentUser -ieq $Username) {
+        Write-Host "Already running as target user '$Username'. Starting user-context provisioning through a least-privilege scheduled task."
+        Write-Host "This avoids running Spotify from the elevated Administrator process."
 
-        Write-Host "Immediate first-logon provisioning exited with code $($process.ExitCode)."
+        $taskName = "DeltaProvisioning-FirstLogon-$Username"
+        $taskPath = "\DeltaProvisioning\"
+        $taskUser = "$env:USERDOMAIN\$env:USERNAME"
+        $taskArgs = "-NoProfile -ExecutionPolicy Bypass -File `"$firstLogonScript`" -TargetUsername `"$Username`" -LogPath `"$logPath`""
 
-        if ($process.ExitCode -eq 0 -and (Test-Path $firstLogonCmd)) {
-            Remove-Item -Path $firstLogonCmd -Force -ErrorAction SilentlyContinue
-            Write-Host "Removed first-logon Startup trigger because it already ran successfully."
+        try {
+            $existingTask = Get-ScheduledTask -TaskName $taskName -TaskPath $taskPath -ErrorAction SilentlyContinue
+            if ($existingTask) {
+                Unregister-ScheduledTask -TaskName $taskName -TaskPath $taskPath -Confirm:$false -ErrorAction SilentlyContinue
+            }
+
+            $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $taskArgs
+            $trigger = New-ScheduledTaskTrigger -AtLogOn -User $taskUser
+            $principal = New-ScheduledTaskPrincipal -UserId $taskUser -LogonType Interactive -RunLevel LeastPrivilege
+            $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 45)
+
+            Register-ScheduledTask -TaskName $taskName -TaskPath $taskPath -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description "Delta provisioning first-logon user-context task for $Username" -Force | Out-Null
+            Start-ScheduledTask -TaskName $taskName -TaskPath $taskPath
+
+            Write-Host "Started scheduled task $taskPath$taskName as $taskUser with least privileges."
+            Write-Host "First-logon Startup trigger remains in place as a retry mechanism until the staged script succeeds."
+            Write-Host "Log file: $logPath"
         }
-        elseif ($process.ExitCode -ne 0) {
-            Write-Warning "First-logon provisioning returned a non-zero exit code. Startup trigger was left in place so it can retry at next login."
+        catch {
+            Write-Warning "Could not start first-logon provisioning as an alternate user-context task: $($_.Exception.Message)"
+            Write-Host "Reboot or sign out/sign back in as $Username to run: $firstLogonCmd"
         }
     }
-    catch {
-        Write-Warning "Could not run first-logon provisioning immediately: $($_.Exception.Message)"
+    else {
+        Write-Host "Current user '$currentUser' is not target user '$Username'. First-logon provisioning will run when $Username logs in."
     }
 }
+
 
 function Configure-ScreenSaverAndPower {
     Write-Step "Configuring screensaver and power settings"
