@@ -1,4 +1,4 @@
-# Script version: 2026-06-24-v29-retreat-folder-root
+# Script version: 2026-06-24-v31-retreat-folder-root
 #requires -RunAsAdministrator
 <#
 Purpose:
@@ -1966,22 +1966,6 @@ function Reset-TaskbarPinsForProvisionedApps {
 }
 
 
-function Get-PrimaryIPv4AddressForWallpaper {
-    try {
-        $ip = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
-            Where-Object {
-                $_.IPAddress -notlike "169.254.*" -and
-                $_.IPAddress -ne "127.0.0.1" -and
-                $_.PrefixOrigin -ne "WellKnown"
-            } |
-            Sort-Object InterfaceMetric, InterfaceIndex |
-            Select-Object -First 1 -ExpandProperty IPAddress
-        if ($ip) { return $ip }
-    }
-    catch { }
-    return "Unavailable"
-}
-
 
 function Test-RobotoFontFamilyCompleteForWallpaper {
     $fontFolder = Join-Path $env:WINDIR "Fonts"
@@ -2237,6 +2221,9 @@ function New-RetreatInfoWallpaper {
         New-Item -Path $wallpaperFolder -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
     }
 
+    # Remove any previous generated wallpaper so older builds with IP address text cannot remain cached.
+    Remove-Item -Path $wallpaperPath -Force -ErrorAction SilentlyContinue
+
     try {
         Add-Type -AssemblyName System.Drawing -ErrorAction Stop
 
@@ -2267,7 +2254,6 @@ function New-RetreatInfoWallpaper {
         $manufacturer = if ($computerSystem.Manufacturer) { $computerSystem.Manufacturer.Trim() } else { "Unavailable" }
         $model = if ($computerSystem.Model) { $computerSystem.Model.Trim() } else { "Unavailable" }
         $osCaption = if ($os.Caption) { $os.Caption.Trim() } else { "Unavailable" }
-        $ip = Get-PrimaryIPv4AddressForWallpaper
         $fontName = Get-PreferredWallpaperFontName
 
         Write-Log "Wallpaper target file: $wallpaperPath"
@@ -2301,10 +2287,10 @@ function New-RetreatInfoWallpaper {
             @{ Label = "Serial Number"; Value = $serial },
             @{ Label = "Asset Tag"; Value = $assetTag },
             @{ Label = "Model"; Value = "$manufacturer $model" },
-            @{ Label = "IP Address"; Value = $ip },
             @{ Label = "Logged-in User"; Value = $env:USERNAME },
             @{ Label = "Operating System"; Value = $osCaption }
         )
+        Write-Log "Wallpaper information block intentionally excludes IP address."
 
         $totalHeight = ($rows.Count * $rowHeight) + 22
         $x = [Math]::Max($margin, $width - $blockWidth - $margin)

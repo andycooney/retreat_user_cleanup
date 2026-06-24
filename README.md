@@ -1,4 +1,4 @@
-# Prepare-LocalAdminMachine-v29.ps1
+# Prepare-LocalAdminMachine-v31.ps1
 
 PowerShell provisioning script for preparing a Windows computer for a local `retreat`-style administrator/autologon user profile.
 
@@ -11,20 +11,20 @@ This script is designed for kiosk, presentation, event, retreat, or shared-use m
 ## Current version
 
 ```text
-Prepare-LocalAdminMachine-v29.ps1
+Prepare-LocalAdminMachine-v31.ps1
 ```
 
 Matching README:
 
 ```text
-README-Prepare-LocalAdminMachine-v29.md
+README-Prepare-LocalAdminMachine-v31.md
 ```
 
 ---
 
-## v29 retreat-folder correction
+## v31 retreat-folder correction
 
-Version v29 addresses the latest cleanup pass:
+Version v31 addresses the latest cleanup pass:
 
 - Keeps provisioning-generated/staged files under `C:\Temp` instead of `C:\ProgramData\DeltaProvisioning`.
 - Stages user-context Spotify through an HKCU `RunOnce` value that points to a command file stored under `C:\Temp\DeltaProvisioning`.
@@ -64,7 +64,7 @@ C:\Temp\DeltaProvisioning
 Set-ExecutionPolicy Bypass -Scope Process -Force
 
 powershell.exe -NoProfile -ExecutionPolicy Bypass `
-  -File "$env:USERPROFILE\Downloads\Prepare-LocalAdminMachine-v29.ps1" `
+  -File "$env:USERPROFILE\Downloads\Prepare-LocalAdminMachine-v31.ps1" `
   -LocalAdminUser "retreat" `
   -LocalAdminPassword "YourPasswordHere"
 ```
@@ -75,7 +75,7 @@ With a computer rename:
 Set-ExecutionPolicy Bypass -Scope Process -Force
 
 powershell.exe -NoProfile -ExecutionPolicy Bypass `
-  -File "$env:USERPROFILE\Downloads\Prepare-LocalAdminMachine-v29.ps1" `
+  -File "$env:USERPROFILE\Downloads\Prepare-LocalAdminMachine-v31.ps1" `
   -LocalAdminUser "retreat" `
   -LocalAdminPassword "YourPasswordHere" `
   -NewComputerName "RETREAT-001"
@@ -87,7 +87,7 @@ Optional domain-unjoin credential:
 $cred = Get-Credential
 
 powershell.exe -NoProfile -ExecutionPolicy Bypass `
-  -File "$env:USERPROFILE\Downloads\Prepare-LocalAdminMachine-v29.ps1" `
+  -File "$env:USERPROFILE\Downloads\Prepare-LocalAdminMachine-v31.ps1" `
   -LocalAdminUser "retreat" `
   -LocalAdminPassword "YourPasswordHere" `
   -DomainUnjoinCredential $cred
@@ -393,7 +393,6 @@ The wallpaper includes:
 - Serial number
 - Asset tag
 - Manufacturer and model
-- IP address
 - Logged-in user
 - OS version
 - Generated timestamp
@@ -500,7 +499,7 @@ Get-ChildItem C:\Windows\Fonts\Roboto* -ErrorAction SilentlyContinue |
     Select-Object Name, Length
 ```
 
-v29 does not skip Roboto installation merely because the `Roboto` family name exists. It checks for a complete variable-font pair or the core static weights before considering the family complete.
+v31 does not skip Roboto installation merely because the `Roboto` family name exists. It checks for a complete variable-font pair or the core static weights before considering the family complete.
 
 ### Check first-logon/user-context log
 
@@ -527,14 +526,14 @@ Select-Object DisplayName, DisplayVersion, Publisher
 When this script is iterated, keep the script and README versions in sync. For example:
 
 ```text
-Prepare-LocalAdminMachine-v29.ps1
-README-Prepare-LocalAdminMachine-v29.md
+Prepare-LocalAdminMachine-v31.ps1
+README-Prepare-LocalAdminMachine-v31.md
 ```
 
 
-## v29 notes
+## v31 notes
 
-If the wallpaper still does not show after running v29, check:
+If the wallpaper still does not show after running v31, check:
 
 ```powershell
 Test-Path C:\Temp\retreat-system-info-wallpaper.jpg
@@ -544,3 +543,15 @@ reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\Policies\System" /v Wa
 ```
 
 A sign out/sign in or reboot may still be needed on some Windows 11 builds if Explorer or policy refresh delays the visible desktop update.
+
+
+## Version Notes
+
+### v31
+
+- Removed IP address from the generated system-information wallpaper.
+
+
+## v31 note
+
+The generated wallpaper intentionally excludes IP address information. v31 also deletes the previous generated wallpaper file before rendering a fresh image so an older wallpaper with IP information is not reused.
