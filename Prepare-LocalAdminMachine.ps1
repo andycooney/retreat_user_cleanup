@@ -1,5 +1,6 @@
 # Script version: 2026-06-24-v35-tolerant-machine-policy-registry-writes
 #requires -RunAsAdministrator
+# Version: v36
 <#
 Purpose:
 - Ensure a local administrator account exists
@@ -872,8 +873,15 @@ function Configure-MachineActiveContentPolicies {
 
     # These HKLM policy settings are applied during the elevated bootstrap run.
     # Per-user HKCU taskbar/desktop settings are staged into the first-logon script.
+    # Some managed/OEM builds lock HKLM:\SOFTWARE\Policies\Microsoft\Dsh even for local admins.
+    # This policy only controls Widgets/News. User-level/taskbar cleanup still handles it, so skip cleanly if locked.
     $dshPolicy = "HKLM:\SOFTWARE\Policies\Microsoft\Dsh"
-    $null = Set-RegistryDWordValue -Path $dshPolicy -Name "AllowNewsAndInterests" -Value 0
+    try {
+        $null = Set-RegistryDWordValue -Path $dshPolicy -Name "AllowNewsAndInterests" -Value 0
+    }
+    catch {
+        Write-Warning "Skipping Dsh Widgets/News machine policy because this computer denied access to ${dshPolicy}: $($_.Exception.Message)"
+    }
 
     $windowsSearchPolicy = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Windows Search"
     $null = Set-RegistryDWordValue -Path $windowsSearchPolicy -Name "AllowSearchHighlights" -Value 0

@@ -1,8 +1,12 @@
-# Prepare-LocalAdminMachine-v35.ps1
+# Prepare Local Admin Machine v36
 
-## v35 update
+## v36 change
 
-Version v35 makes HKLM machine-policy registry writes tolerant of locked-down systems. If a policy key such as `HKLM:\SOFTWARE\Policies\Microsoft\Dsh` denies access on a particular computer, the script now logs a warning, attempts a `reg.exe` fallback, and skips that specific policy value instead of terminating the entire provisioning run.
+- Handles computers that deny access to `HKLM:\SOFTWARE\Policies\Microsoft\Dsh` by skipping that optional Widgets/News machine policy instead of stopping the script. User-level taskbar cleanup still hides Widgets/News where Windows allows.
+
+## v36 update
+
+Version v36 makes HKLM machine-policy registry writes tolerant of locked-down systems. If a policy key such as `HKLM:\SOFTWARE\Policies\Microsoft\Dsh` denies access on a particular computer, the script now logs a warning, attempts a `reg.exe` fallback, and skips that specific policy value instead of terminating the entire provisioning run.
 
 
 PowerShell provisioning script for preparing a Windows computer for a local `retreat`-style administrator/autologon user profile.
@@ -16,20 +20,20 @@ This script is designed for kiosk, presentation, event, retreat, or shared-use m
 ## Current version
 
 ```text
-Prepare-LocalAdminMachine-v35.ps1
+Prepare-LocalAdminMachine-v36.ps1
 ```
 
 Matching README:
 
 ```text
-README-Prepare-LocalAdminMachine-v35.md
+README-Prepare-LocalAdminMachine-v36.md
 ```
 
 ---
 
-## v35 system icon font repair
+## v36 system icon font repair
 
-Version v35 addresses the Start menu/taskbar square-glyph issue seen after the Roboto/font and shell customization passes:
+Version v36 addresses the Start menu/taskbar square-glyph issue seen after the Roboto/font and shell customization passes:
 
 - Re-registers the Windows shell icon fonts:
   - Segoe MDL2 Assets
@@ -52,7 +56,7 @@ A sign-out/sign-in or reboot may still be required because Explorer and Start ca
 Set-ExecutionPolicy Bypass -Scope Process -Force
 
 powershell.exe -NoProfile -ExecutionPolicy Bypass `
-  -File "$env:USERPROFILE\Downloads\Prepare-LocalAdminMachine-v35.ps1" `
+  -File "$env:USERPROFILE\Downloads\Prepare-LocalAdminMachine-v36.ps1" `
   -LocalAdminUser "retreat" `
   -LocalAdminPassword "YourPasswordHere"
 ```
@@ -63,7 +67,7 @@ With a computer rename:
 Set-ExecutionPolicy Bypass -Scope Process -Force
 
 powershell.exe -NoProfile -ExecutionPolicy Bypass `
-  -File "$env:USERPROFILE\Downloads\Prepare-LocalAdminMachine-v35.ps1" `
+  -File "$env:USERPROFILE\Downloads\Prepare-LocalAdminMachine-v36.ps1" `
   -LocalAdminUser "retreat" `
   -LocalAdminPassword "YourPasswordHere" `
   -NewComputerName "RETREAT-001"
@@ -75,7 +79,7 @@ Optional domain-unjoin credential:
 $cred = Get-Credential
 
 powershell.exe -NoProfile -ExecutionPolicy Bypass `
-  -File "$env:USERPROFILE\Downloads\Prepare-LocalAdminMachine-v35.ps1" `
+  -File "$env:USERPROFILE\Downloads\Prepare-LocalAdminMachine-v36.ps1" `
   -LocalAdminUser "retreat" `
   -LocalAdminPassword "YourPasswordHere" `
   -DomainUnjoinCredential $cred
@@ -124,7 +128,7 @@ The script may create the following files and folders:
 C:\retreat
 C:\Temp\first-logon-<username>.log
 C:\Temp\retreat-computer-name.txt
-C:\Temp\retreat-system-info-wallpaper-v35.jpg
+C:\Temp\retreat-system-info-wallpaper-v36.jpg
 C:\Temp\RobotoFontInstall\
 C:\Temp\DeltaProvisioning\FirstLogon-For-<username>.ps1
 C:\Temp\DeltaProvisioning\TaskbarLayout-<username>.xml
@@ -372,7 +376,7 @@ Attempts to disable or hide:
 Generates a static desktop wallpaper at:
 
 ```text
-C:\Temp\retreat-system-info-wallpaper-v35.jpg
+C:\Temp\retreat-system-info-wallpaper-v36.jpg
 ```
 
 The wallpaper includes:
@@ -477,7 +481,7 @@ Get-Content C:\Temp\retreat-computer-name.txt -ErrorAction SilentlyContinue
 ### Confirm wallpaper file
 
 ```powershell
-Test-Path C:\Temp\retreat-system-info-wallpaper-v35.jpg
+Test-Path C:\Temp\retreat-system-info-wallpaper-v36.jpg
 ```
 
 ### Confirm Roboto fonts
@@ -487,7 +491,7 @@ Get-ChildItem C:\Windows\Fonts\Roboto* -ErrorAction SilentlyContinue |
     Select-Object Name, Length
 ```
 
-v35 does not skip Roboto installation merely because the `Roboto` family name exists. It checks for a complete variable-font pair or the core static weights before considering the family complete.
+v36 does not skip Roboto installation merely because the `Roboto` family name exists. It checks for a complete variable-font pair or the core static weights before considering the family complete.
 
 ### Check first-logon/user-context log
 
@@ -514,17 +518,17 @@ Select-Object DisplayName, DisplayVersion, Publisher
 When this script is iterated, keep the script and README versions in sync. For example:
 
 ```text
-Prepare-LocalAdminMachine-v35.ps1
-README-Prepare-LocalAdminMachine-v35.md
+Prepare-LocalAdminMachine-v36.ps1
+README-Prepare-LocalAdminMachine-v36.md
 ```
 
 
-## v35 notes
+## v36 notes
 
-If the wallpaper still does not show after running v35, check:
+If the wallpaper still does not show after running v36, check:
 
 ```powershell
-Test-Path C:\Temp\retreat-system-info-wallpaper-v35.jpg
+Test-Path C:\Temp\retreat-system-info-wallpaper-v36.jpg
 Get-Content C:\Temp\first-logon-retreat.log -Tail 80
 reg query "HKCU\Control Panel\Desktop" /v Wallpaper
 reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\Policies\System" /v Wallpaper
@@ -535,15 +539,15 @@ A sign out/sign in or reboot may still be needed on some Windows 11 builds if Ex
 
 ## Version Notes
 
-### v35
+### v36
 
 - Removed IP address from the generated system-information wallpaper.
 
 
-## v35 note
+## v36 note
 
-The generated wallpaper intentionally excludes IP address information. v35 also deletes the previous generated wallpaper file before rendering a fresh image so an older wallpaper with IP information is not reused.
+The generated wallpaper intentionally excludes IP address information. v36 also deletes the previous generated wallpaper file before rendering a fresh image so an older wallpaper with IP information is not reused.
 
-## v35 wallpaper cache-busting note
+## v36 wallpaper cache-busting note
 
-v35 changes the generated wallpaper file to `C:\Temp\retreat-system-info-wallpaper-v35.jpg`, removes older `retreat-system-info-wallpaper*.jpg` files from `C:\Temp`, and clears the current user's Windows wallpaper cache under `%APPDATA%\Microsoft\Windows\Themes`. This prevents Windows from continuing to display an older cached wallpaper that still included IP address information.
+v36 changes the generated wallpaper file to `C:\Temp\retreat-system-info-wallpaper-v36.jpg`, removes older `retreat-system-info-wallpaper*.jpg` files from `C:\Temp`, and clears the current user's Windows wallpaper cache under `%APPDATA%\Microsoft\Windows\Themes`. This prevents Windows from continuing to display an older cached wallpaper that still included IP address information.
