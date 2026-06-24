@@ -1,4 +1,4 @@
-# Script version: 2026-06-23-v13-taskbar-layout-policy
+# Script version: 2026-06-23-v14-taskbar-powerpoint-hover-cleanup
 #requires -RunAsAdministrator
 <#
 Purpose:
@@ -619,23 +619,23 @@ function Set-TaskbarPreferencesInRegistryRoot {
 
     # Windows 11 taskbar alignment and taskbar buttons.
     # TaskbarAl: 0 = left, 1 = center.
-    Set-RegistryDWordValue -Path $advancedPath -Name "TaskbarAl" -Value 0
+    $null = Set-RegistryDWordValue -Path $advancedPath -Name "TaskbarAl" -Value 0
 
     # Hide Widgets, Chat/Teams personal, Copilot, and Task View buttons where supported.
-    Set-RegistryDWordValue -Path $advancedPath -Name "TaskbarDa" -Value 0
-    Set-RegistryDWordValue -Path $advancedPath -Name "TaskbarMn" -Value 0
-    Set-RegistryDWordValue -Path $advancedPath -Name "ShowTaskViewButton" -Value 0
-    Set-RegistryDWordValue -Path $advancedPath -Name "ShowCopilotButton" -Value 0
+    $null = Set-RegistryDWordValue -Path $advancedPath -Name "TaskbarDa" -Value 0
+    $null = Set-RegistryDWordValue -Path $advancedPath -Name "TaskbarMn" -Value 0
+    $null = Set-RegistryDWordValue -Path $advancedPath -Name "ShowTaskViewButton" -Value 0
+    $null = Set-RegistryDWordValue -Path $advancedPath -Name "ShowCopilotButton" -Value 0
 
     # Hide the taskbar search box/icon.
     # SearchboxTaskbarMode: 0 = hidden, 1 = icon only, 2 = search box.
-    Set-RegistryDWordValue -Path $searchPath -Name "SearchboxTaskbarMode" -Value 0
+    $null = Set-RegistryDWordValue -Path $searchPath -Name "SearchboxTaskbarMode" -Value 0
 
     # Disable dynamic/highlighted content in the search box where supported.
-    Set-RegistryDWordValue -Path $searchSettingsPath -Name "IsDynamicSearchBoxEnabled" -Value 0
+    $null = Set-RegistryDWordValue -Path $searchSettingsPath -Name "IsDynamicSearchBoxEnabled" -Value 0
 
     # Windows 10 News and Interests: 2 = hidden.
-    Set-RegistryDWordValue -Path $feedsPath -Name "ShellFeedsTaskbarViewMode" -Value 2
+    $null = Set-RegistryDWordValue -Path $feedsPath -Name "ShellFeedsTaskbarViewMode" -Value 2
 
     # Disable Windows Spotlight, active backgrounds, tips, suggestions, and other content delivery for this user.
     $contentDeliveryValues = @{
@@ -663,22 +663,22 @@ function Set-TaskbarPreferencesInRegistryRoot {
     }
 
     foreach ($item in $contentDeliveryValues.GetEnumerator()) {
-        Set-RegistryDWordValue -Path $contentDeliveryPath -Name $item.Key -Value $item.Value
+        $null = Set-RegistryDWordValue -Path $contentDeliveryPath -Name $item.Key -Value $item.Value
     }
 
     # Stop Windows Spotlight desktop wallpaper and remove the "Learn about this picture" desktop icon.
-    Set-RegistryStringValue -Path $desktopPath -Name "Wallpaper" -Value ""
-    Set-RegistryStringValue -Path $desktopPath -Name "WallpaperStyle" -Value "0"
-    Set-RegistryStringValue -Path $desktopPath -Name "TileWallpaper" -Value "0"
-    Set-RegistryDWordValue -Path $desktopIconsPath -Name "{2cc5ca98-6485-489a-920e-b3e88a6ccce3}" -Value 1
-    Set-RegistryDWordValue -Path $desktopIconsClassicPath -Name "{2cc5ca98-6485-489a-920e-b3e88a6ccce3}" -Value 1
+    $null = Set-RegistryStringValue -Path $desktopPath -Name "Wallpaper" -Value ""
+    $null = Set-RegistryStringValue -Path $desktopPath -Name "WallpaperStyle" -Value "0"
+    $null = Set-RegistryStringValue -Path $desktopPath -Name "TileWallpaper" -Value "0"
+    $null = Set-RegistryDWordValue -Path $desktopIconsPath -Name "{2cc5ca98-6485-489a-920e-b3e88a6ccce3}" -Value 1
+    $null = Set-RegistryDWordValue -Path $desktopIconsClassicPath -Name "{2cc5ca98-6485-489a-920e-b3e88a6ccce3}" -Value 1
 
     # Disable advertising ID, tailored experiences, and Start recommendations/suggestions where supported.
-    Set-RegistryDWordValue -Path $advertisingInfoPath -Name "Enabled" -Value 0
-    Set-RegistryDWordValue -Path $privacyPath -Name "TailoredExperiencesWithDiagnosticDataEnabled" -Value 0
-    Set-RegistryDWordValue -Path $startPath -Name "Start_IrisRecommendations" -Value 0
-    Set-RegistryDWordValue -Path $startPath -Name "Start_AccountNotifications" -Value 0
-    Set-RegistryDWordValue -Path $startPath -Name "ShowSyncProviderNotifications" -Value 0
+    $null = Set-RegistryDWordValue -Path $advertisingInfoPath -Name "Enabled" -Value 0
+    $null = Set-RegistryDWordValue -Path $privacyPath -Name "TailoredExperiencesWithDiagnosticDataEnabled" -Value 0
+    $null = Set-RegistryDWordValue -Path $startPath -Name "Start_IrisRecommendations" -Value 0
+    $null = Set-RegistryDWordValue -Path $startPath -Name "Start_AccountNotifications" -Value 0
+    $null = Set-RegistryDWordValue -Path $startPath -Name "ShowSyncProviderNotifications" -Value 0
 
     # Clear per-user CloudStore content cache that can resurrect Widgets/Spotlight/taskbar state.
     if (Test-Path $cloudStorePath) {
@@ -733,41 +733,41 @@ function Configure-MachineActiveContentPolicies {
     # These HKLM policy settings are applied during the elevated bootstrap run.
     # Per-user HKCU taskbar/desktop settings are staged into the first-logon script.
     $dshPolicy = "HKLM:\SOFTWARE\Policies\Microsoft\Dsh"
-    Set-RegistryDWordValue -Path $dshPolicy -Name "AllowNewsAndInterests" -Value 0
+    $null = Set-RegistryDWordValue -Path $dshPolicy -Name "AllowNewsAndInterests" -Value 0
 
     $windowsSearchPolicy = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Windows Search"
-    Set-RegistryDWordValue -Path $windowsSearchPolicy -Name "AllowSearchHighlights" -Value 0
-    Set-RegistryDWordValue -Path $windowsSearchPolicy -Name "DisableSearchBoxSuggestions" -Value 1
-    Set-RegistryDWordValue -Path $windowsSearchPolicy -Name "AllowCloudSearch" -Value 0
-    Set-RegistryDWordValue -Path $windowsSearchPolicy -Name "ConnectedSearchUseWeb" -Value 0
-    Set-RegistryDWordValue -Path $windowsSearchPolicy -Name "ConnectedSearchUseWebOverMeteredConnections" -Value 0
+    $null = Set-RegistryDWordValue -Path $windowsSearchPolicy -Name "AllowSearchHighlights" -Value 0
+    $null = Set-RegistryDWordValue -Path $windowsSearchPolicy -Name "DisableSearchBoxSuggestions" -Value 1
+    $null = Set-RegistryDWordValue -Path $windowsSearchPolicy -Name "AllowCloudSearch" -Value 0
+    $null = Set-RegistryDWordValue -Path $windowsSearchPolicy -Name "ConnectedSearchUseWeb" -Value 0
+    $null = Set-RegistryDWordValue -Path $windowsSearchPolicy -Name "ConnectedSearchUseWebOverMeteredConnections" -Value 0
 
     $cloudContentPolicy = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\CloudContent"
-    Set-RegistryDWordValue -Path $cloudContentPolicy -Name "DisableWindowsConsumerFeatures" -Value 1
-    Set-RegistryDWordValue -Path $cloudContentPolicy -Name "DisableWindowsSpotlightFeatures" -Value 1
-    Set-RegistryDWordValue -Path $cloudContentPolicy -Name "DisableSpotlightCollectionOnDesktop" -Value 1
-    Set-RegistryDWordValue -Path $cloudContentPolicy -Name "DisableWindowsSpotlightOnActionCenter" -Value 1
-    Set-RegistryDWordValue -Path $cloudContentPolicy -Name "DisableWindowsSpotlightOnSettings" -Value 1
-    Set-RegistryDWordValue -Path $cloudContentPolicy -Name "DisableWindowsSpotlightWindowsWelcomeExperience" -Value 1
-    Set-RegistryDWordValue -Path $cloudContentPolicy -Name "DisableThirdPartySuggestions" -Value 1
-    Set-RegistryDWordValue -Path $cloudContentPolicy -Name "DisableTailoredExperiencesWithDiagnosticData" -Value 1
-    Set-RegistryDWordValue -Path $cloudContentPolicy -Name "DisableSoftLanding" -Value 1
-    Set-RegistryDWordValue -Path $cloudContentPolicy -Name "ConfigureWindowsSpotlight" -Value 2
+    $null = Set-RegistryDWordValue -Path $cloudContentPolicy -Name "DisableWindowsConsumerFeatures" -Value 1
+    $null = Set-RegistryDWordValue -Path $cloudContentPolicy -Name "DisableWindowsSpotlightFeatures" -Value 1
+    $null = Set-RegistryDWordValue -Path $cloudContentPolicy -Name "DisableSpotlightCollectionOnDesktop" -Value 1
+    $null = Set-RegistryDWordValue -Path $cloudContentPolicy -Name "DisableWindowsSpotlightOnActionCenter" -Value 1
+    $null = Set-RegistryDWordValue -Path $cloudContentPolicy -Name "DisableWindowsSpotlightOnSettings" -Value 1
+    $null = Set-RegistryDWordValue -Path $cloudContentPolicy -Name "DisableWindowsSpotlightWindowsWelcomeExperience" -Value 1
+    $null = Set-RegistryDWordValue -Path $cloudContentPolicy -Name "DisableThirdPartySuggestions" -Value 1
+    $null = Set-RegistryDWordValue -Path $cloudContentPolicy -Name "DisableTailoredExperiencesWithDiagnosticData" -Value 1
+    $null = Set-RegistryDWordValue -Path $cloudContentPolicy -Name "DisableSoftLanding" -Value 1
+    $null = Set-RegistryDWordValue -Path $cloudContentPolicy -Name "ConfigureWindowsSpotlight" -Value 2
 
     $personalizationPolicy = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Personalization"
-    Set-RegistryDWordValue -Path $personalizationPolicy -Name "NoLockScreenSlideshow" -Value 1
-    Set-RegistryDWordValue -Path $personalizationPolicy -Name "NoChangingLockScreen" -Value 1
+    $null = Set-RegistryDWordValue -Path $personalizationPolicy -Name "NoLockScreenSlideshow" -Value 1
+    $null = Set-RegistryDWordValue -Path $personalizationPolicy -Name "NoChangingLockScreen" -Value 1
 
     $explorerPolicy = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Explorer"
-    Set-RegistryDWordValue -Path $explorerPolicy -Name "DisableSearchBoxSuggestions" -Value 1
-    Set-RegistryDWordValue -Path $explorerPolicy -Name "HideRecommendedSection" -Value 1
-    Set-RegistryDWordValue -Path $explorerPolicy -Name "DisableNotificationCenter" -Value 1
+    $null = Set-RegistryDWordValue -Path $explorerPolicy -Name "DisableSearchBoxSuggestions" -Value 1
+    $null = Set-RegistryDWordValue -Path $explorerPolicy -Name "HideRecommendedSection" -Value 1
+    $null = Set-RegistryDWordValue -Path $explorerPolicy -Name "DisableNotificationCenter" -Value 1
 
     $windowsCopilotPolicy = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsCopilot"
-    Set-RegistryDWordValue -Path $windowsCopilotPolicy -Name "TurnOffWindowsCopilot" -Value 1
+    $null = Set-RegistryDWordValue -Path $windowsCopilotPolicy -Name "TurnOffWindowsCopilot" -Value 1
 
     $windowsChatPolicy = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Windows Chat"
-    Set-RegistryDWordValue -Path $windowsChatPolicy -Name "ChatIcon" -Value 3
+    $null = Set-RegistryDWordValue -Path $windowsChatPolicy -Name "ChatIcon" -Value 3
 
     Write-Host "Machine active-content policies applied. Per-user cleanup is staged for first logon."
 }
@@ -808,7 +808,7 @@ function Configure-ChromeDefaultBrowserForNewUsers {
 
     # Policy nudge: when Chrome is present and launched, allow it to check/offer default browser behavior.
     $chromePolicy = "HKLM:\SOFTWARE\Policies\Google\Chrome"
-    Set-RegistryDWordValue -Path $chromePolicy -Name "DefaultBrowserSettingEnabled" -Value 1
+    $null = Set-RegistryDWordValue -Path $chromePolicy -Name "DefaultBrowserSettingEnabled" -Value 1
 
     Write-Warning "Windows protects per-user default-browser hashes. This reliably stages Chrome defaults for new profiles; existing profiles may still require confirmation in Settings."
 }
@@ -1040,8 +1040,8 @@ function Disable-TeamsStartupForCurrentUser {
     }
 
     $teamsPolicyPath = "HKCU:\Software\Microsoft\Office\Teams"
-    Set-RegistryDWordValue -Path $teamsPolicyPath -Name "PreventFirstLaunchAfterInstall" -Value 1
-    Set-RegistryDWordValue -Path $teamsPolicyPath -Name "AutoStart" -Value 0
+    $null = Set-RegistryDWordValue -Path $teamsPolicyPath -Name "PreventFirstLaunchAfterInstall" -Value 1
+    $null = Set-RegistryDWordValue -Path $teamsPolicyPath -Name "AutoStart" -Value 0
 
     $teamsConfigCandidates = @(
         "$env:APPDATA\Microsoft\Teams\desktop-config.json",
@@ -1091,18 +1091,18 @@ function Configure-CurrentUserTaskbarAndActiveContent {
     $privacyPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Privacy"
     $cloudStorePath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\CloudStore\Store\Cache\DefaultAccount"
 
-    Set-RegistryDWordValue -Path $advancedPath -Name "TaskbarAl" -Value 0
-    Set-RegistryDWordValue -Path $advancedPath -Name "TaskbarDa" -Value 0
-    Set-RegistryDWordValue -Path $advancedPath -Name "TaskbarMn" -Value 0
-    Set-RegistryDWordValue -Path $advancedPath -Name "ShowTaskViewButton" -Value 0
-    Set-RegistryDWordValue -Path $advancedPath -Name "ShowCopilotButton" -Value 0
-    Set-RegistryDWordValue -Path $advancedPath -Name "Start_IrisRecommendations" -Value 0
-    Set-RegistryDWordValue -Path $advancedPath -Name "Start_AccountNotifications" -Value 0
-    Set-RegistryDWordValue -Path $advancedPath -Name "ShowSyncProviderNotifications" -Value 0
+    $null = Set-RegistryDWordValue -Path $advancedPath -Name "TaskbarAl" -Value 0
+    $null = Set-RegistryDWordValue -Path $advancedPath -Name "TaskbarDa" -Value 0
+    $null = Set-RegistryDWordValue -Path $advancedPath -Name "TaskbarMn" -Value 0
+    $null = Set-RegistryDWordValue -Path $advancedPath -Name "ShowTaskViewButton" -Value 0
+    $null = Set-RegistryDWordValue -Path $advancedPath -Name "ShowCopilotButton" -Value 0
+    $null = Set-RegistryDWordValue -Path $advancedPath -Name "Start_IrisRecommendations" -Value 0
+    $null = Set-RegistryDWordValue -Path $advancedPath -Name "Start_AccountNotifications" -Value 0
+    $null = Set-RegistryDWordValue -Path $advancedPath -Name "ShowSyncProviderNotifications" -Value 0
 
-    Set-RegistryDWordValue -Path $searchPath -Name "SearchboxTaskbarMode" -Value 0
-    Set-RegistryDWordValue -Path $searchSettingsPath -Name "IsDynamicSearchBoxEnabled" -Value 0
-    Set-RegistryDWordValue -Path $feedsPath -Name "ShellFeedsTaskbarViewMode" -Value 2
+    $null = Set-RegistryDWordValue -Path $searchPath -Name "SearchboxTaskbarMode" -Value 0
+    $null = Set-RegistryDWordValue -Path $searchSettingsPath -Name "IsDynamicSearchBoxEnabled" -Value 0
+    $null = Set-RegistryDWordValue -Path $feedsPath -Name "ShellFeedsTaskbarViewMode" -Value 2
 
     $contentDeliveryValues = @{
         "ContentDeliveryAllowed" = 0
@@ -1128,20 +1128,20 @@ function Configure-CurrentUserTaskbarAndActiveContent {
         "SubscribedContent-88000327Enabled" = 0
     }
     foreach ($item in $contentDeliveryValues.GetEnumerator()) {
-        Set-RegistryDWordValue -Path $contentDeliveryPath -Name $item.Key -Value $item.Value
+        $null = Set-RegistryDWordValue -Path $contentDeliveryPath -Name $item.Key -Value $item.Value
     }
 
-    Set-RegistryStringValue -Path $desktopPath -Name "Wallpaper" -Value ""
-    Set-RegistryStringValue -Path $desktopPath -Name "WallpaperStyle" -Value "0"
-    Set-RegistryStringValue -Path $desktopPath -Name "TileWallpaper" -Value "0"
-    Set-RegistryStringValue -Path $desktopPath -Name "ScreenSaveActive" -Value "0"
-    Set-RegistryStringValue -Path $desktopPath -Name "ScreenSaverIsSecure" -Value "0"
+    $null = Set-RegistryStringValue -Path $desktopPath -Name "Wallpaper" -Value ""
+    $null = Set-RegistryStringValue -Path $desktopPath -Name "WallpaperStyle" -Value "0"
+    $null = Set-RegistryStringValue -Path $desktopPath -Name "TileWallpaper" -Value "0"
+    $null = Set-RegistryStringValue -Path $desktopPath -Name "ScreenSaveActive" -Value "0"
+    $null = Set-RegistryStringValue -Path $desktopPath -Name "ScreenSaverIsSecure" -Value "0"
     Remove-ItemProperty -Path $desktopPath -Name "SCRNSAVE.EXE" -ErrorAction SilentlyContinue
 
-    Set-RegistryDWordValue -Path $desktopIconsPath -Name "{2cc5ca98-6485-489a-920e-b3e88a6ccce3}" -Value 1
-    Set-RegistryDWordValue -Path $desktopIconsClassicPath -Name "{2cc5ca98-6485-489a-920e-b3e88a6ccce3}" -Value 1
-    Set-RegistryDWordValue -Path $advertisingInfoPath -Name "Enabled" -Value 0
-    Set-RegistryDWordValue -Path $privacyPath -Name "TailoredExperiencesWithDiagnosticDataEnabled" -Value 0
+    $null = Set-RegistryDWordValue -Path $desktopIconsPath -Name "{2cc5ca98-6485-489a-920e-b3e88a6ccce3}" -Value 1
+    $null = Set-RegistryDWordValue -Path $desktopIconsClassicPath -Name "{2cc5ca98-6485-489a-920e-b3e88a6ccce3}" -Value 1
+    $null = Set-RegistryDWordValue -Path $advertisingInfoPath -Name "Enabled" -Value 0
+    $null = Set-RegistryDWordValue -Path $privacyPath -Name "TailoredExperiencesWithDiagnosticDataEnabled" -Value 0
 
     if (Test-Path $cloudStorePath) {
         Remove-Item -Path $cloudStorePath -Recurse -Force -ErrorAction SilentlyContinue
@@ -1216,6 +1216,16 @@ function Configure-TaskbarLayoutPolicyForFileExplorerAndPowerPoint {
 
     $powerPointExe = Find-PowerPointExe
     $powerPointShortcut = Join-Path $programDataStartMenu "PowerPoint.lnk"
+
+    Get-ChildItem -Path $programDataStartMenu -Filter "PowerPoint*.lnk" -Force -ErrorAction SilentlyContinue | Where-Object { $_.Name -ne "PowerPoint.lnk" } | ForEach-Object {
+        try {
+            Write-Log "Removing duplicate Start Menu PowerPoint shortcut before creating canonical taskbar layout link: $($_.FullName)"
+            Remove-Item -Path $_.FullName -Force -ErrorAction SilentlyContinue
+        }
+        catch {
+            Write-Log "Could not remove duplicate Start Menu PowerPoint shortcut $($_.FullName): $($_.Exception.Message)"
+        }
+    }
 
     if ($powerPointExe) {
         try {
@@ -1387,6 +1397,19 @@ function Reset-TaskbarPinsKeepFileExplorerAndPinPowerPoint {
         return
     }
 
+    # Normalize PowerPoint taskbar shortcuts so the taskbar hover text is "PowerPoint", not
+    # "PowerPoint (2)" or another duplicate shortcut name. Windows often uses the .lnk file
+    # name for the taskbar tooltip/title.
+    Get-ChildItem -Path $taskbarPinnedFolder -Filter "PowerPoint*.lnk" -Force -ErrorAction SilentlyContinue | ForEach-Object {
+        try {
+            Write-Log "Removing duplicate PowerPoint taskbar shortcut before recreating canonical shortcut: $($_.FullName)"
+            Remove-Item -Path $_.FullName -Force -ErrorAction SilentlyContinue
+        }
+        catch {
+            Write-Log "Could not remove duplicate PowerPoint shortcut $($_.FullName): $($_.Exception.Message)"
+        }
+    }
+
     $shortcutPath = Join-Path $taskbarPinnedFolder "PowerPoint.lnk"
     if ($wsh) {
         try {
@@ -1396,7 +1419,7 @@ function Reset-TaskbarPinsKeepFileExplorerAndPinPowerPoint {
             $shortcut.IconLocation = "$powerPointExe,0"
             $shortcut.Description = "PowerPoint"
             $shortcut.Save()
-            Write-Log "Created PowerPoint shortcut in taskbar pinned folder: $shortcutPath"
+            Write-Log "Created canonical PowerPoint shortcut in taskbar pinned folder: $shortcutPath"
         }
         catch {
             Write-Log "Could not create PowerPoint taskbar shortcut: $($_.Exception.Message)"
@@ -1442,7 +1465,7 @@ function Set-ChromeDefaultBrowserBestEffort {
 
     try {
         $chromePolicy = "HKCU:\Software\Policies\Google\Chrome"
-        Set-RegistryDWordValue -Path $chromePolicy -Name "DefaultBrowserSettingEnabled" -Value 1
+        $null = Set-RegistryDWordValue -Path $chromePolicy -Name "DefaultBrowserSettingEnabled" -Value 1
         Write-Log "Set Chrome default-browser policy nudge for current user."
     }
     catch {
