@@ -1,4 +1,4 @@
-# Prepare-LocalAdminMachine-v28.ps1
+# Prepare-LocalAdminMachine-v29.ps1
 
 PowerShell provisioning script for preparing a Windows computer for a local `retreat`-style administrator/autologon user profile.
 
@@ -11,25 +11,25 @@ This script is designed for kiosk, presentation, event, retreat, or shared-use m
 ## Current version
 
 ```text
-Prepare-LocalAdminMachine-v28.ps1
+Prepare-LocalAdminMachine-v29.ps1
 ```
 
 Matching README:
 
 ```text
-README-Prepare-LocalAdminMachine-v28.md
+README-Prepare-LocalAdminMachine-v29.md
 ```
 
 ---
 
-## v28 temp-folder and compact-wallpaper update
+## v29 retreat-folder correction
 
-Version v28 addresses the latest cleanup pass:
+Version v29 addresses the latest cleanup pass:
 
 - Keeps provisioning-generated/staged files under `C:\Temp` instead of `C:\ProgramData\DeltaProvisioning`.
 - Stages user-context Spotify through an HKCU `RunOnce` value that points to a command file stored under `C:\Temp\DeltaProvisioning`.
-- Moves the retreat working folder to `C:\Temp\retreat`.
-- Updates the File Explorer shortcut target to open `C:\Temp\retreat`.
+- Keeps the retreat working folder at `C:\retreat`, while provisioning logs/support files remain under `C:\Temp`.
+- Updates the File Explorer shortcut target to open `C:\retreat`.
 - Fixes the wallpaper reapply path bug that could produce an illegal path such as `C:\Tempetreat-system-info-wallpaper.jpg`.
 - Updates the wallpaper design:
   - removes the `Retreat Computer` heading,
@@ -64,7 +64,7 @@ C:\Temp\DeltaProvisioning
 Set-ExecutionPolicy Bypass -Scope Process -Force
 
 powershell.exe -NoProfile -ExecutionPolicy Bypass `
-  -File "$env:USERPROFILE\Downloads\Prepare-LocalAdminMachine-v28.ps1" `
+  -File "$env:USERPROFILE\Downloads\Prepare-LocalAdminMachine-v29.ps1" `
   -LocalAdminUser "retreat" `
   -LocalAdminPassword "YourPasswordHere"
 ```
@@ -75,7 +75,7 @@ With a computer rename:
 Set-ExecutionPolicy Bypass -Scope Process -Force
 
 powershell.exe -NoProfile -ExecutionPolicy Bypass `
-  -File "$env:USERPROFILE\Downloads\Prepare-LocalAdminMachine-v28.ps1" `
+  -File "$env:USERPROFILE\Downloads\Prepare-LocalAdminMachine-v29.ps1" `
   -LocalAdminUser "retreat" `
   -LocalAdminPassword "YourPasswordHere" `
   -NewComputerName "RETREAT-001"
@@ -87,7 +87,7 @@ Optional domain-unjoin credential:
 $cred = Get-Credential
 
 powershell.exe -NoProfile -ExecutionPolicy Bypass `
-  -File "$env:USERPROFILE\Downloads\Prepare-LocalAdminMachine-v28.ps1" `
+  -File "$env:USERPROFILE\Downloads\Prepare-LocalAdminMachine-v29.ps1" `
   -LocalAdminUser "retreat" `
   -LocalAdminPassword "YourPasswordHere" `
   -DomainUnjoinCredential $cred
@@ -133,7 +133,7 @@ Spotify is handled differently because the Spotify installer often does not beha
 The script may create the following files and folders:
 
 ```text
-C:\Temp\retreat
+C:\retreat
 C:\Temp\first-logon-<username>.log
 C:\Temp\retreat-computer-name.txt
 C:\Temp\retreat-system-info-wallpaper.jpg
@@ -286,7 +286,7 @@ When run for the target user, the staged user/profile script handles:
 
 - Removes existing desktop icons/items from the current user's desktop and the Public Desktop.
 - Creates clean desktop shortcuts for:
-  - File Explorer, opening `C:\Temp\retreat`
+  - File Explorer, opening `C:\retreat`
   - PowerPoint
   - Windows Media Player Legacy
   - Google Chrome
@@ -296,7 +296,7 @@ When run for the target user, the staged user/profile script handles:
 Applies a taskbar layout intended to show:
 
 ```text
-File Explorer -> opens C:\Temp\retreat
+File Explorer -> opens C:\retreat
 PowerPoint
 Windows Media Player Legacy
 Google Chrome
@@ -323,10 +323,10 @@ Some Windows 10/11 builds do not apply taskbar layout changes until sign out/sig
 - Creates the File Explorer taskbar and desktop shortcut so it opens:
 
 ```text
-C:\Temp\retreat
+C:\retreat
 ```
 
-Windows does not natively support setting every new Explorer window to an arbitrary folder such as `C:\Temp\retreat`, so the shortcut target is the reliable behavior.
+Windows does not natively support setting every new Explorer window to an arbitrary folder such as `C:\retreat`, so the shortcut target is the reliable behavior.
 
 ### Chrome
 
@@ -500,7 +500,7 @@ Get-ChildItem C:\Windows\Fonts\Roboto* -ErrorAction SilentlyContinue |
     Select-Object Name, Length
 ```
 
-v28 does not skip Roboto installation merely because the `Roboto` family name exists. It checks for a complete variable-font pair or the core static weights before considering the family complete.
+v29 does not skip Roboto installation merely because the `Roboto` family name exists. It checks for a complete variable-font pair or the core static weights before considering the family complete.
 
 ### Check first-logon/user-context log
 
@@ -527,14 +527,14 @@ Select-Object DisplayName, DisplayVersion, Publisher
 When this script is iterated, keep the script and README versions in sync. For example:
 
 ```text
-Prepare-LocalAdminMachine-v28.ps1
-README-Prepare-LocalAdminMachine-v28.md
+Prepare-LocalAdminMachine-v29.ps1
+README-Prepare-LocalAdminMachine-v29.md
 ```
 
 
-## v28 notes
+## v29 notes
 
-If the wallpaper still does not show after running v28, check:
+If the wallpaper still does not show after running v29, check:
 
 ```powershell
 Test-Path C:\Temp\retreat-system-info-wallpaper.jpg

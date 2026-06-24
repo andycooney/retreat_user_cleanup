@@ -1,4 +1,4 @@
-# Script version: 2026-06-24-v28-temp-only-compact-wallpaper
+# Script version: 2026-06-24-v29-retreat-folder-root
 #requires -RunAsAdministrator
 <#
 Purpose:
@@ -11,7 +11,7 @@ Purpose:
 - Run Chrome, Slido, taskbar, desktop, and per-user UI cleanup from the main script when running as the target user; stage only Spotify for a regular non-elevated target-user logon; and install Windows Media Player Legacy
 - Disable screensaver
 - Apply machine policies for active content now; stage per-user taskbar/Spotlight/default-browser/taskbar-pin cleanup for first target-user logon; keep File Explorer pinned and pin PowerPoint, Windows Media Player Legacy, and Google Chrome
-- Create C:\Temp\retreat
+- Create C:\retreat
 - Optionally rename the computer with -NewComputerName
 - Install the full Roboto font family from Google Fonts
 - Generate a static system-information wallpaper using Roboto
@@ -857,9 +857,9 @@ function Configure-MachineActiveContentPolicies {
 
 
 function Ensure-RetreatFolder {
-    Write-Step "Creating C:\Temp\retreat folder"
-    New-Item -Path "C:\Temp\retreat" -ItemType Directory -Force | Out-Null
-    Write-Host "Ensured folder exists: C:\Temp\retreat"
+    Write-Step "Creating C:\retreat folder"
+    New-Item -Path "C:\retreat" -ItemType Directory -Force | Out-Null
+    Write-Host "Ensured folder exists: C:\retreat"
 }
 
 function Test-RobotoFontFamilyComplete {
@@ -1086,7 +1086,7 @@ param(
 )
 
 $ErrorActionPreference = "Continue"
-$RetreatFolder = "C:\Temp\retreat"
+$RetreatFolder = "C:\retreat"
 
 function Write-Log {
     param([string]$Message)
@@ -1578,7 +1578,7 @@ function Reset-DesktopIconsAndCreateProvisionedShortcuts {
 
     $explorerExe = "$env:WINDIR\explorer.exe"
     if (Test-Path $explorerExe) {
-        New-OrUpdateShortcut -ShortcutPath (Join-Path $userDesktop "File Explorer.lnk") -TargetPath $explorerExe -Arguments '"C:\Temp\retreat"' -WorkingDirectory $RetreatFolder -IconLocation "$explorerExe,0" -Description "File Explorer" | Out-Null
+        New-OrUpdateShortcut -ShortcutPath (Join-Path $userDesktop "File Explorer.lnk") -TargetPath $explorerExe -Arguments '"C:\retreat"' -WorkingDirectory $RetreatFolder -IconLocation "$explorerExe,0" -Description "File Explorer" | Out-Null
     }
 
     $powerPointExe = Find-PowerPointExe
@@ -1617,7 +1617,7 @@ function Configure-TaskbarLayoutPolicyForProvisionedApps {
         $wshForExplorerPolicy = New-Object -ComObject WScript.Shell
         $explorerPolicyShortcut = $wshForExplorerPolicy.CreateShortcut($fileExplorerPolicyShortcut)
         $explorerPolicyShortcut.TargetPath = "$env:WINDIR\explorer.exe"
-        $explorerPolicyShortcut.Arguments = '"C:\Temp\retreat"'
+        $explorerPolicyShortcut.Arguments = '"C:\retreat"'
         $explorerPolicyShortcut.WorkingDirectory = $RetreatFolder
         $explorerPolicyShortcut.IconLocation = "$env:WINDIR\explorer.exe,0"
         $explorerPolicyShortcut.Description = "File Explorer"
@@ -1630,7 +1630,7 @@ function Configure-TaskbarLayoutPolicyForProvisionedApps {
 
     # Best-effort Explorer preference. Windows supports LaunchTo values such as Home/This PC,
     # but not a native per-user default of an arbitrary folder. The pinned shortcut above is
-    # therefore the reliable way to make the taskbar Explorer button open C:\Temp\retreat.
+    # therefore the reliable way to make the taskbar Explorer button open C:\retreat.
     $advancedPathForExplorer = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced"
     Set-RegistryDWordValue -Path $advancedPathForExplorer -Name "LaunchTo" -Value 1 | Out-Null
     Write-Log "Set File Explorer launch preference to This PC where supported; taskbar shortcut directly targets $RetreatFolder."
@@ -1846,7 +1846,7 @@ function Reset-TaskbarPinsForProvisionedApps {
         try {
             $fileExplorerShortcut = $wsh.CreateShortcut($fileExplorerShortcutPath)
             $fileExplorerShortcut.TargetPath = "$env:WINDIR\explorer.exe"
-            $fileExplorerShortcut.Arguments = '"C:\Temp\retreat"'
+            $fileExplorerShortcut.Arguments = '"C:\retreat"'
             $fileExplorerShortcut.WorkingDirectory = $RetreatFolder
             $fileExplorerShortcut.IconLocation = "$env:WINDIR\explorer.exe,0"
             $fileExplorerShortcut.Description = "File Explorer"
