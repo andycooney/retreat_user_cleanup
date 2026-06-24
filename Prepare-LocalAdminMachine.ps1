@@ -615,6 +615,7 @@ function Set-TaskbarPreferencesInRegistryRoot {
     $advertisingInfoPath = Join-Path $RootPath "Software\Microsoft\Windows\CurrentVersion\AdvertisingInfo"
     $privacyPath = Join-Path $RootPath "Software\Microsoft\Windows\CurrentVersion\Privacy"
     $startPath = Join-Path $RootPath "Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced"
+    $phoneLinkStartCompanionPath = Join-Path $RootPath "Software\Microsoft\Windows\CurrentVersion\Start\Companions\Microsoft.YourPhone_8wekyb3d8bbwe"
     $cloudStorePath = Join-Path $RootPath "Software\Microsoft\Windows\CurrentVersion\CloudStore\Store\Cache\DefaultAccount"
 
     # Windows 11 taskbar alignment and taskbar buttons.
@@ -680,6 +681,9 @@ function Set-TaskbarPreferencesInRegistryRoot {
     $null = Set-RegistryDWordValue -Path $startPath -Name "Start_AccountNotifications" -Value 0
     $null = Set-RegistryDWordValue -Path $startPath -Name "ShowSyncProviderNotifications" -Value 0
 
+    # Disable Phone Link / "Show mobile device in Start" companion content where supported.
+    $null = Set-RegistryDWordValue -Path $phoneLinkStartCompanionPath -Name "IsEnabled" -Value 0
+
     # Clear per-user CloudStore content cache that can resurrect Widgets/Spotlight/taskbar state.
     if (Test-Path $cloudStorePath) {
         Remove-Item -Path $cloudStorePath -Recurse -Force -ErrorAction SilentlyContinue
@@ -728,7 +732,7 @@ function Unload-UserHiveIfLoadedByScript {
 }
 
 function Configure-MachineActiveContentPolicies {
-    Write-Step "Configuring machine policies for widgets, news, search, Spotlight, Copilot, and active content"
+    Write-Step "Configuring machine policies for widgets, news, search, Spotlight, Copilot, Phone Link, and active content"
 
     # These HKLM policy settings are applied during the elevated bootstrap run.
     # Per-user HKCU taskbar/desktop settings are staged into the first-logon script.
@@ -768,6 +772,9 @@ function Configure-MachineActiveContentPolicies {
 
     $windowsChatPolicy = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Windows Chat"
     $null = Set-RegistryDWordValue -Path $windowsChatPolicy -Name "ChatIcon" -Value 3
+
+    $systemPolicy = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\System"
+    $null = Set-RegistryDWordValue -Path $systemPolicy -Name "EnableCdp" -Value 0
 
     Write-Host "Machine active-content policies applied. Per-user cleanup is staged for first logon."
 }
@@ -1103,7 +1110,7 @@ function Disable-TeamsStartupForCurrentUser {
 }
 
 function Configure-CurrentUserTaskbarAndActiveContent {
-    Write-Log "Configuring taskbar, desktop, Spotlight, screensaver, and active content for current user."
+    Write-Log "Configuring taskbar, desktop, Spotlight, Phone Link Start companion, screensaver, and active content for current user."
 
     $advancedPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced"
     $searchPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Search"
@@ -1115,6 +1122,7 @@ function Configure-CurrentUserTaskbarAndActiveContent {
     $desktopIconsClassicPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\HideDesktopIcons\ClassicStartMenu"
     $advertisingInfoPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\AdvertisingInfo"
     $privacyPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Privacy"
+    $phoneLinkStartCompanionPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Start\Companions\Microsoft.YourPhone_8wekyb3d8bbwe"
     $cloudStorePath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\CloudStore\Store\Cache\DefaultAccount"
 
     $null = Set-RegistryDWordValue -Path $advancedPath -Name "TaskbarAl" -Value 0
@@ -1125,6 +1133,9 @@ function Configure-CurrentUserTaskbarAndActiveContent {
     $null = Set-RegistryDWordValue -Path $advancedPath -Name "Start_IrisRecommendations" -Value 0
     $null = Set-RegistryDWordValue -Path $advancedPath -Name "Start_AccountNotifications" -Value 0
     $null = Set-RegistryDWordValue -Path $advancedPath -Name "ShowSyncProviderNotifications" -Value 0
+
+    # Disable Phone Link / "Show mobile device in Start" companion content for this user.
+    $null = Set-RegistryDWordValue -Path $phoneLinkStartCompanionPath -Name "IsEnabled" -Value 0
 
     $null = Set-RegistryDWordValue -Path $searchPath -Name "SearchboxTaskbarMode" -Value 0
     $null = Set-RegistryDWordValue -Path $searchSettingsPath -Name "IsDynamicSearchBoxEnabled" -Value 0
