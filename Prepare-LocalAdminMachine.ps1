@@ -1,4 +1,4 @@
-# Script version: 2026-06-23-v14-taskbar-powerpoint-hover-cleanup
+# Script version: 2026-06-23-v17-hello-desktop-chrome-taskbar
 #requires -RunAsAdministrator
 <#
 Purpose:
@@ -10,7 +10,7 @@ Purpose:
 - Remove Cisco AnyConnect / Cisco Secure Client, Duo Windows Logon, and ThreatLocker if present
 - Stage Spotify, Slido, and per-user UI cleanup to run at first target-user logon, and install Windows Media Player Legacy
 - Disable screensaver
-- Apply machine policies for active content now; stage per-user taskbar/Spotlight/default-browser/taskbar-pin cleanup for first target-user logon; keep File Explorer pinned and pin PowerPoint plus Windows Media Player Legacy
+- Apply machine policies for active content now; stage per-user taskbar/Spotlight/default-browser/taskbar-pin cleanup for first target-user logon; keep File Explorer pinned and pin PowerPoint, Windows Media Player Legacy, and Google Chrome
 - Create C:\retreat
 - Set AC power: screen stays on, no sleep/hibernate
 - Set DC battery power: screen/sleep/hibernate after 4 hours
@@ -779,6 +779,31 @@ function Ensure-RetreatFolder {
     Write-Host "Ensured folder exists: C:\retreat"
 }
 
+function Configure-WindowsHelloAndSetupExperienceSuppression {
+    Write-Step "Disabling Windows Hello, biometric prompts, PIN provisioning, and setup experience prompts"
+
+    $passportPolicy = "HKLM:\SOFTWARE\Policies\Microsoft\PassportForWork"
+    New-Item -Path $passportPolicy -Force | Out-Null
+    New-ItemProperty -Path $passportPolicy -Name "Enabled" -PropertyType DWord -Value 0 -Force | Out-Null
+    New-ItemProperty -Path $passportPolicy -Name "DisablePostLogonProvisioning" -PropertyType DWord -Value 1 -Force | Out-Null
+
+    $biometricsPolicy = "HKLM:\SOFTWARE\Policies\Microsoft\Biometrics"
+    New-Item -Path $biometricsPolicy -Force | Out-Null
+    New-ItemProperty -Path $biometricsPolicy -Name "Enabled" -PropertyType DWord -Value 0 -Force | Out-Null
+
+    $systemPolicy = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\System"
+    New-Item -Path $systemPolicy -Force | Out-Null
+    New-ItemProperty -Path $systemPolicy -Name "AllowDomainPINLogon" -PropertyType DWord -Value 0 -Force | Out-Null
+    New-ItemProperty -Path $systemPolicy -Name "EnableCdp" -PropertyType DWord -Value 0 -Force | Out-Null
+
+    $cloudContentPolicy = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\CloudContent"
+    New-Item -Path $cloudContentPolicy -Force | Out-Null
+    New-ItemProperty -Path $cloudContentPolicy -Name "DisableWindowsConsumerFeatures" -PropertyType DWord -Value 1 -Force | Out-Null
+    New-ItemProperty -Path $cloudContentPolicy -Name "DisableSoftLanding" -PropertyType DWord -Value 1 -Force | Out-Null
+
+    Write-Host "Windows Hello/PIN/biometric provisioning prompts disabled where policy allows. Existing sign-in methods are not deleted."
+}
+
 function Configure-ChromeDefaultBrowserForNewUsers {
     Write-Step "Staging Chrome as default browser for new user profiles"
 
@@ -1230,8 +1255,111 @@ function Find-WindowsMediaPlayerExe {
     return $null
 }
 
-function Configure-TaskbarLayoutPolicyForFileExplorerPowerPointAndWmp {
-    Write-Log "Configuring taskbar layout policy for File Explorer, PowerPoint, and Windows Media Player Legacy."
+function Find-ChromeExe {
+    $candidates = @(
+        "$env:ProgramFiles\Google\Chrome\Application\chrome.exe",
+        "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe",
+        "$env:LOCALAPPDATA\Google\Chrome\Application\chrome.exe"
+    )
+
+    foreach ($candidate in $candidates) {
+        if ($candidate -and (Test-Path $candidate)) { return $candidate }
+    }
+
+    return $null
+}
+
+function New-OrUpdateShortcut {
+    param(
+        [Parameter(Mandatory)][string]$ShortcutPath,
+        [Parameter(Mandatory)][string]$TargetPath,
+        [string]$Arguments = "",
+        [string]$WorkingDirectory = "",
+        [string]$IconLocation = "",
+        [string]$Description = ""
+    )
+
+    try {
+        $parent = Split-Path $ShortcutPath -Parent
+        New-Item -Path $parent -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
+        $wsh = New-Object -ComObject WScript.Shell
+        $shortcut = $wsh.CreateShortcut($ShortcutPath)
+        $shortcut.TargetPath = $TargetPath
+        $shortcut.Arguments = $Arguments
+        if ($WorkingDirectory) { $shortcut.WorkingDirectory = $WorkingDirectory }
+        if ($IconLocation) { $shortcut.IconLocation = $IconLocation }
+        if ($Description) { $shortcut.Description = $Description }
+        $shortcut.Save()
+        Write-Log "Created shortcut: $ShortcutPath"
+        return $true
+    }
+    catch {
+        Write-Log "Could not create shortcut ${ShortcutPath}: $($_.Exception.Message)"
+        return $false
+    }
+}
+
+function Reset-DesktopIconsAndCreateProvisionedShortcuts {
+    Write-Log "Removing desktop icons and creating provisioned desktop shortcuts."
+
+    $desktopFolders = @(
+        [Environment]::GetFolderPath("Desktop"),
+        "$env:PUBLIC\Desktop"
+    ) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -Unique
+
+    foreach ($folder in $desktopFolders) {
+        Get-ChildItem -Path $folder -Force -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -ne "desktop.ini" } |
+            ForEach-Object {
+                try {
+                    Write-Log "Removing desktop item: $($_.FullName)"
+                    Remove-Item -Path $_.FullName -Force -Recurse -ErrorAction SilentlyContinue
+                }
+                catch {
+                    Write-Log "Could not remove desktop item $($_.FullName): $($_.Exception.Message)"
+                }
+            }
+    }
+
+    $userDesktop = [Environment]::GetFolderPath("Desktop")
+    if (-not $userDesktop) {
+        Write-Log "Could not resolve current user desktop path. Desktop shortcuts were not created."
+        return
+    }
+
+    New-Item -Path $RetreatFolder -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
+
+    $explorerExe = "$env:WINDIR\explorer.exe"
+    if (Test-Path $explorerExe) {
+        New-OrUpdateShortcut -ShortcutPath (Join-Path $userDesktop "File Explorer.lnk") -TargetPath $explorerExe -Arguments '"C:\retreat"' -WorkingDirectory $RetreatFolder -IconLocation "$explorerExe,0" -Description "File Explorer" | Out-Null
+    }
+
+    $powerPointExe = Find-PowerPointExe
+    if ($powerPointExe) { New-OrUpdateShortcut -ShortcutPath (Join-Path $userDesktop "PowerPoint.lnk") -TargetPath $powerPointExe -WorkingDirectory (Split-Path $powerPointExe -Parent) -IconLocation "$powerPointExe,0" -Description "PowerPoint" | Out-Null }
+    else { Write-Log "PowerPoint executable not found. Desktop shortcut was not created." }
+
+    $wmpExe = Find-WindowsMediaPlayerExe
+    if ($wmpExe) { New-OrUpdateShortcut -ShortcutPath (Join-Path $userDesktop "Windows Media Player Legacy.lnk") -TargetPath $wmpExe -WorkingDirectory (Split-Path $wmpExe -Parent) -IconLocation "$wmpExe,0" -Description "Windows Media Player Legacy" | Out-Null }
+    else { Write-Log "Windows Media Player Legacy executable not found. Desktop shortcut was not created." }
+
+    $chromeExe = Find-ChromeExe
+    if ($chromeExe) { New-OrUpdateShortcut -ShortcutPath (Join-Path $userDesktop "Google Chrome.lnk") -TargetPath $chromeExe -WorkingDirectory (Split-Path $chromeExe -Parent) -IconLocation "$chromeExe,0" -Description "Google Chrome" | Out-Null }
+    else { Write-Log "Google Chrome executable not found. Desktop shortcut was not created." }
+}
+
+function Disable-WindowsHelloAndSetupPromptsForCurrentUser {
+    Write-Log "Disabling Windows Hello/setup prompts for current user where policy allows."
+
+    $null = Set-RegistryDWordValue -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\UserProfileEngagement" -Name "ScoobeSystemSettingEnabled" -Value 0
+    $null = Set-RegistryDWordValue -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager" -Name "SubscribedContent-310093Enabled" -Value 0
+    $null = Set-RegistryDWordValue -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager" -Name "SubscribedContent-338389Enabled" -Value 0
+    $null = Set-RegistryDWordValue -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager" -Name "SubscribedContent-338393Enabled" -Value 0
+    $null = Set-RegistryDWordValue -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager" -Name "SubscribedContent-353694Enabled" -Value 0
+    $null = Set-RegistryDWordValue -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager" -Name "SubscribedContent-353696Enabled" -Value 0
+}
+
+function Configure-TaskbarLayoutPolicyForProvisionedApps {
+    Write-Log "Configuring taskbar layout policy for File Explorer, PowerPoint, Windows Media Player Legacy, and Google Chrome."
 
     $programDataStartMenu = Join-Path $env:ProgramData "Microsoft\Windows\Start Menu\Programs"
     New-Item -Path $programDataStartMenu -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
@@ -1324,6 +1452,26 @@ function Configure-TaskbarLayoutPolicyForFileExplorerPowerPointAndWmp {
         Write-Log "Windows Media Player Legacy executable not found. Taskbar policy will not include Windows Media Player."
     }
 
+    $chromeExe = Find-ChromeExe
+    $chromeShortcut = Join-Path $programDataStartMenu "Google Chrome.lnk"
+
+    Get-ChildItem -Path $programDataStartMenu -Filter "Google Chrome*.lnk" -Force -ErrorAction SilentlyContinue | Where-Object { $_.Name -ne "Google Chrome.lnk" } | ForEach-Object {
+        try {
+            Write-Log "Removing duplicate Start Menu Google Chrome shortcut before creating canonical taskbar layout link: $($_.FullName)"
+            Remove-Item -Path $_.FullName -Force -ErrorAction SilentlyContinue
+        }
+        catch {
+            Write-Log "Could not remove duplicate Start Menu Google Chrome shortcut $($_.FullName): $($_.Exception.Message)"
+        }
+    }
+
+    if ($chromeExe) {
+        New-OrUpdateShortcut -ShortcutPath $chromeShortcut -TargetPath $chromeExe -WorkingDirectory (Split-Path $chromeExe -Parent) -IconLocation "$chromeExe,0" -Description "Google Chrome" | Out-Null
+    }
+    else {
+        Write-Log "Google Chrome executable not found. Taskbar policy will not include Google Chrome."
+    }
+
     $taskbarAppLines = @(
         '        <taskbar:DesktopApp DesktopApplicationLinkPath="%ALLUSERSPROFILE%\Microsoft\Windows\Start Menu\Programs\File Explorer.lnk" />'
     )
@@ -1332,6 +1480,9 @@ function Configure-TaskbarLayoutPolicyForFileExplorerPowerPointAndWmp {
     }
     if ($wmpExe -and (Test-Path $wmpShortcut)) {
         $taskbarAppLines += '        <taskbar:DesktopApp DesktopApplicationLinkPath="%ALLUSERSPROFILE%\Microsoft\Windows\Start Menu\Programs\Windows Media Player Legacy.lnk" />'
+    }
+    if ($chromeExe -and (Test-Path $chromeShortcut)) {
+        $taskbarAppLines += '        <taskbar:DesktopApp DesktopApplicationLinkPath="%ALLUSERSPROFILE%\Microsoft\Windows\Start Menu\Programs\Google Chrome.lnk" />'
     }
     $taskbarPinsXml = $taskbarAppLines -join "`r`n"
 
@@ -1387,8 +1538,8 @@ $taskbarPinsXml
 }
 
 
-function Reset-TaskbarPinsKeepFileExplorerAndPinPowerPointAndWmp {
-    Write-Log "Resetting taskbar pinned items, keeping File Explorer, and attempting to pin PowerPoint plus Windows Media Player Legacy."
+function Reset-TaskbarPinsForProvisionedApps {
+    Write-Log "Resetting taskbar pinned items and staging File Explorer, PowerPoint, Windows Media Player Legacy, and Google Chrome."
 
     $taskbarPinnedFolder = Join-Path $env:APPDATA "Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar"
     New-Item -Path $taskbarPinnedFolder -ItemType Directory -Force | Out-Null
@@ -1525,10 +1676,30 @@ function Reset-TaskbarPinsKeepFileExplorerAndPinPowerPointAndWmp {
         }
     }
 
+    $chromeExe = Find-ChromeExe
+    if (-not $chromeExe) {
+        Write-Log "Google Chrome executable not found. Could not pin Google Chrome."
+    }
+
+    Get-ChildItem -Path $taskbarPinnedFolder -Filter "Google Chrome*.lnk" -Force -ErrorAction SilentlyContinue | ForEach-Object {
+        try {
+            Write-Log "Removing duplicate Google Chrome taskbar shortcut before recreating canonical shortcut: $($_.FullName)"
+            Remove-Item -Path $_.FullName -Force -ErrorAction SilentlyContinue
+        }
+        catch {
+            Write-Log "Could not remove duplicate Google Chrome shortcut $($_.FullName): $($_.Exception.Message)"
+        }
+    }
+
+    $chromeShortcutPath = Join-Path $taskbarPinnedFolder "Google Chrome.lnk"
+    if ($wsh -and $chromeExe) {
+        New-OrUpdateShortcut -ShortcutPath $chromeShortcutPath -TargetPath $chromeExe -WorkingDirectory (Split-Path $chromeExe -Parent) -IconLocation "$chromeExe,0" -Description "Google Chrome" | Out-Null
+    }
+
     # Best-effort shell verb pin. On newer Windows 10/11 builds this verb is often hidden/blocked.
     try {
         $shell = New-Object -ComObject Shell.Application
-        foreach ($pinPath in @($fileExplorerShortcutPath, $shortcutPath, $wmpShortcutPath)) {
+        foreach ($pinPath in @($fileExplorerShortcutPath, $shortcutPath, $wmpShortcutPath, $chromeShortcutPath)) {
             if (-not (Test-Path $pinPath)) { continue }
             $folder = $shell.Namespace((Split-Path $pinPath -Parent))
             $item = $folder.ParseName((Split-Path $pinPath -Leaf))
@@ -1582,13 +1753,16 @@ if ($currentUser -ine $TargetUsername) {
 
 Write-Log "First-logon provisioning started for $TargetUsername."
 Remove-EdgeDesktopShortcuts
-Set-ChromeDefaultBrowserBestEffort
-Reset-TaskbarPinsKeepFileExplorerAndPinPowerPointAndWmp
-Configure-TaskbarLayoutPolicyForFileExplorerPowerPointAndWmp
-Disable-TeamsStartupForCurrentUser
-Configure-CurrentUserTaskbarAndActiveContent
+Disable-WindowsHelloAndSetupPromptsForCurrentUser
+Invoke-WingetInstallWithTimeout -PackageId "Google.Chrome" -FriendlyName "Google Chrome" -InstalledDisplayNamePattern "^Google Chrome" -Silent $true -TimeoutSeconds 1800
 Invoke-WingetInstallWithTimeout -PackageId "Spotify.Spotify" -FriendlyName "Spotify" -InstalledDisplayNamePattern "^Spotify" -Silent $true -TimeoutSeconds 1800
 Invoke-WingetInstallWithTimeout -PackageId "Slido.Slido" -FriendlyName "Slido for PowerPoint" -InstalledDisplayNamePattern "^Slido" -Silent $false -TimeoutSeconds 1800
+Set-ChromeDefaultBrowserBestEffort
+Reset-TaskbarPinsForProvisionedApps
+Reset-DesktopIconsAndCreateProvisionedShortcuts
+Configure-TaskbarLayoutPolicyForProvisionedApps
+Disable-TeamsStartupForCurrentUser
+Configure-CurrentUserTaskbarAndActiveContent
 Disable-TeamsStartupForCurrentUser
 
 try {
@@ -1713,6 +1887,7 @@ Remove-FromDomainIfJoined `
 
 Disable-StartupItems -Username $LocalAdminUser
 Ensure-RetreatFolder
+Configure-WindowsHelloAndSetupExperienceSuppression
 Configure-MachineActiveContentPolicies
 Configure-ChromeDefaultBrowserForNewUsers
 Stage-FirstLogonProvisioning -Username $LocalAdminUser
