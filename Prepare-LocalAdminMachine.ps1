@@ -10,7 +10,7 @@ Purpose:
 - Remove Cisco AnyConnect / Cisco Secure Client, Duo Windows Logon, and ThreatLocker if present
 - Stage Spotify, Slido, and per-user UI cleanup to run at first target-user logon, and install Windows Media Player Legacy
 - Disable screensaver
-- Apply machine policies for active content now; stage per-user taskbar/Spotlight/default-browser/taskbar-pin cleanup for first target-user logon; keep File Explorer pinned and pin PowerPoint
+- Apply machine policies for active content now; stage per-user taskbar/Spotlight/default-browser/taskbar-pin cleanup for first target-user logon; keep File Explorer pinned and pin PowerPoint plus Windows Media Player Legacy
 - Create C:\retreat
 - Set AC power: screen stays on, no sleep/hibernate
 - Set DC battery power: screen/sleep/hibernate after 4 hours
@@ -834,6 +834,7 @@ param(
 )
 
 $ErrorActionPreference = "Continue"
+$RetreatFolder = "C:\retreat"
 
 function Write-Log {
     param([string]$Message)
@@ -1208,11 +1209,56 @@ function Find-PowerPointExe {
     return $null
 }
 
-function Configure-TaskbarLayoutPolicyForFileExplorerAndPowerPoint {
-    Write-Log "Configuring taskbar layout policy for File Explorer and PowerPoint."
+
+function Find-WindowsMediaPlayerExe {
+    $candidates = @(
+        "$env:ProgramFiles\Windows Media Player\wmplayer.exe",
+        "${env:ProgramFiles(x86)}\Windows Media Player\wmplayer.exe",
+        "$env:WINDIR\System32\wmplayer.exe"
+    )
+
+    foreach ($candidate in $candidates) {
+        if ($candidate -and (Test-Path $candidate)) { return $candidate }
+    }
+
+    $roots = @($env:ProgramFiles, ${env:ProgramFiles(x86)}, "$env:WINDIR\System32") | Where-Object { $_ -and (Test-Path $_) } | Select-Object -Unique
+    foreach ($root in $roots) {
+        $found = Get-ChildItem -Path $root -Filter "wmplayer.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($found) { return $found.FullName }
+    }
+
+    return $null
+}
+
+function Configure-TaskbarLayoutPolicyForFileExplorerPowerPointAndWmp {
+    Write-Log "Configuring taskbar layout policy for File Explorer, PowerPoint, and Windows Media Player Legacy."
 
     $programDataStartMenu = Join-Path $env:ProgramData "Microsoft\Windows\Start Menu\Programs"
     New-Item -Path $programDataStartMenu -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
+    New-Item -Path $RetreatFolder -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
+
+    $fileExplorerPolicyShortcut = Join-Path $programDataStartMenu "File Explorer.lnk"
+    try {
+        $wshForExplorerPolicy = New-Object -ComObject WScript.Shell
+        $explorerPolicyShortcut = $wshForExplorerPolicy.CreateShortcut($fileExplorerPolicyShortcut)
+        $explorerPolicyShortcut.TargetPath = "$env:WINDIR\explorer.exe"
+        $explorerPolicyShortcut.Arguments = '"C:\retreat"'
+        $explorerPolicyShortcut.WorkingDirectory = $RetreatFolder
+        $explorerPolicyShortcut.IconLocation = "$env:WINDIR\explorer.exe,0"
+        $explorerPolicyShortcut.Description = "File Explorer"
+        $explorerPolicyShortcut.Save()
+        Write-Log "Created Start Menu File Explorer shortcut targeting $RetreatFolder for taskbar policy: $fileExplorerPolicyShortcut"
+    }
+    catch {
+        Write-Log "Could not create Start Menu File Explorer shortcut targeting ${RetreatFolder}: $($_.Exception.Message)"
+    }
+
+    # Best-effort Explorer preference. Windows supports LaunchTo values such as Home/This PC,
+    # but not a native per-user default of an arbitrary folder. The pinned shortcut above is
+    # therefore the reliable way to make the taskbar Explorer button open C:\retreat.
+    $advancedPathForExplorer = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced"
+    Set-RegistryDWordValue -Path $advancedPathForExplorer -Name "LaunchTo" -Value 1 | Out-Null
+    Write-Log "Set File Explorer launch preference to This PC where supported; taskbar shortcut directly targets $RetreatFolder."
 
     $powerPointExe = Find-PowerPointExe
     $powerPointShortcut = Join-Path $programDataStartMenu "PowerPoint.lnk"
@@ -1246,11 +1292,53 @@ function Configure-TaskbarLayoutPolicyForFileExplorerAndPowerPoint {
         Write-Log "PowerPoint executable not found. Taskbar policy will include File Explorer only."
     }
 
+    $wmpExe = Find-WindowsMediaPlayerExe
+    $wmpShortcut = Join-Path $programDataStartMenu "Windows Media Player Legacy.lnk"
+
+    Get-ChildItem -Path $programDataStartMenu -Filter "Windows Media Player*.lnk" -Force -ErrorAction SilentlyContinue | Where-Object { $_.Name -ne "Windows Media Player Legacy.lnk" } | ForEach-Object {
+        try {
+            Write-Log "Removing duplicate Start Menu Windows Media Player shortcut before creating canonical taskbar layout link: $($_.FullName)"
+            Remove-Item -Path $_.FullName -Force -ErrorAction SilentlyContinue
+        }
+        catch {
+            Write-Log "Could not remove duplicate Start Menu Windows Media Player shortcut $($_.FullName): $($_.Exception.Message)"
+        }
+    }
+
+    if ($wmpExe) {
+        try {
+            $wshWmp = New-Object -ComObject WScript.Shell
+            $wmpLink = $wshWmp.CreateShortcut($wmpShortcut)
+            $wmpLink.TargetPath = $wmpExe
+            $wmpLink.WorkingDirectory = Split-Path $wmpExe -Parent
+            $wmpLink.IconLocation = "$wmpExe,0"
+            $wmpLink.Description = "Windows Media Player Legacy"
+            $wmpLink.Save()
+            Write-Log "Created Start Menu Windows Media Player Legacy shortcut for taskbar policy: $wmpShortcut"
+        }
+        catch {
+            Write-Log "Could not create Windows Media Player Legacy shortcut: $($_.Exception.Message)"
+        }
+    }
+    else {
+        Write-Log "Windows Media Player Legacy executable not found. Taskbar policy will not include Windows Media Player."
+    }
+
+    $taskbarAppLines = @(
+        '        <taskbar:DesktopApp DesktopApplicationLinkPath="%ALLUSERSPROFILE%\Microsoft\Windows\Start Menu\Programs\File Explorer.lnk" />'
+    )
+    if ($powerPointExe -and (Test-Path $powerPointShortcut)) {
+        $taskbarAppLines += '        <taskbar:DesktopApp DesktopApplicationLinkPath="%ALLUSERSPROFILE%\Microsoft\Windows\Start Menu\Programs\PowerPoint.lnk" />'
+    }
+    if ($wmpExe -and (Test-Path $wmpShortcut)) {
+        $taskbarAppLines += '        <taskbar:DesktopApp DesktopApplicationLinkPath="%ALLUSERSPROFILE%\Microsoft\Windows\Start Menu\Programs\Windows Media Player Legacy.lnk" />'
+    }
+    $taskbarPinsXml = $taskbarAppLines -join "`r`n"
+
     $layoutPath = Join-Path $env:ProgramData "DeltaProvisioning\TaskbarLayout-$TargetUsername.xml"
     New-Item -Path (Split-Path $layoutPath -Parent) -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
 
-    if ($powerPointExe -and (Test-Path $powerPointShortcut)) {
-        $xml = @"
+    $xml = @"
 <?xml version="1.0" encoding="utf-8"?>
 <LayoutModificationTemplate
     xmlns="http://schemas.microsoft.com/Start/2014/LayoutModification"
@@ -1261,33 +1349,12 @@ function Configure-TaskbarLayoutPolicyForFileExplorerAndPowerPoint {
   <CustomTaskbarLayoutCollection PinListPlacement="Replace">
     <defaultlayout:TaskbarLayout>
       <taskbar:TaskbarPinList>
-        <taskbar:DesktopApp DesktopApplicationID="Microsoft.Windows.Explorer" />
-        <taskbar:DesktopApp DesktopApplicationLinkPath="%ALLUSERSPROFILE%\Microsoft\Windows\Start Menu\Programs\PowerPoint.lnk" />
+$taskbarPinsXml
       </taskbar:TaskbarPinList>
     </defaultlayout:TaskbarLayout>
   </CustomTaskbarLayoutCollection>
 </LayoutModificationTemplate>
 "@
-    }
-    else {
-        $xml = @"
-<?xml version="1.0" encoding="utf-8"?>
-<LayoutModificationTemplate
-    xmlns="http://schemas.microsoft.com/Start/2014/LayoutModification"
-    xmlns:defaultlayout="http://schemas.microsoft.com/Start/2014/FullDefaultLayout"
-    xmlns:start="http://schemas.microsoft.com/Start/2014/StartLayout"
-    xmlns:taskbar="http://schemas.microsoft.com/Start/2014/TaskbarLayout"
-    Version="1">
-  <CustomTaskbarLayoutCollection PinListPlacement="Replace">
-    <defaultlayout:TaskbarLayout>
-      <taskbar:TaskbarPinList>
-        <taskbar:DesktopApp DesktopApplicationID="Microsoft.Windows.Explorer" />
-      </taskbar:TaskbarPinList>
-    </defaultlayout:TaskbarLayout>
-  </CustomTaskbarLayoutCollection>
-</LayoutModificationTemplate>
-"@
-    }
 
     try {
         Set-Content -Path $layoutPath -Value $xml -Encoding UTF8 -Force
@@ -1320,11 +1387,12 @@ function Configure-TaskbarLayoutPolicyForFileExplorerAndPowerPoint {
 }
 
 
-function Reset-TaskbarPinsKeepFileExplorerAndPinPowerPoint {
-    Write-Log "Resetting taskbar pinned items, keeping File Explorer, and attempting to pin PowerPoint."
+function Reset-TaskbarPinsKeepFileExplorerAndPinPowerPointAndWmp {
+    Write-Log "Resetting taskbar pinned items, keeping File Explorer, and attempting to pin PowerPoint plus Windows Media Player Legacy."
 
     $taskbarPinnedFolder = Join-Path $env:APPDATA "Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar"
     New-Item -Path $taskbarPinnedFolder -ItemType Directory -Force | Out-Null
+    New-Item -Path $RetreatFolder -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
 
     Get-ChildItem -Path $taskbarPinnedFolder -Force -ErrorAction SilentlyContinue | ForEach-Object {
         try {
@@ -1380,11 +1448,12 @@ function Reset-TaskbarPinsKeepFileExplorerAndPinPowerPoint {
         try {
             $fileExplorerShortcut = $wsh.CreateShortcut($fileExplorerShortcutPath)
             $fileExplorerShortcut.TargetPath = "$env:WINDIR\explorer.exe"
-            $fileExplorerShortcut.WorkingDirectory = $env:WINDIR
+            $fileExplorerShortcut.Arguments = '"C:\retreat"'
+            $fileExplorerShortcut.WorkingDirectory = $RetreatFolder
             $fileExplorerShortcut.IconLocation = "$env:WINDIR\explorer.exe,0"
             $fileExplorerShortcut.Description = "File Explorer"
             $fileExplorerShortcut.Save()
-            Write-Log "Created or refreshed File Explorer shortcut in taskbar pinned folder: $fileExplorerShortcutPath"
+            Write-Log "Created or refreshed File Explorer shortcut in taskbar pinned folder targeting ${RetreatFolder}: $fileExplorerShortcutPath"
         }
         catch {
             Write-Log "Could not create File Explorer taskbar shortcut: $($_.Exception.Message)"
@@ -1394,7 +1463,6 @@ function Reset-TaskbarPinsKeepFileExplorerAndPinPowerPoint {
     $powerPointExe = Find-PowerPointExe
     if (-not $powerPointExe) {
         Write-Log "PowerPoint executable not found. Could not pin PowerPoint."
-        return
     }
 
     # Normalize PowerPoint taskbar shortcuts so the taskbar hover text is "PowerPoint", not
@@ -1411,7 +1479,7 @@ function Reset-TaskbarPinsKeepFileExplorerAndPinPowerPoint {
     }
 
     $shortcutPath = Join-Path $taskbarPinnedFolder "PowerPoint.lnk"
-    if ($wsh) {
+    if ($wsh -and $powerPointExe) {
         try {
             $shortcut = $wsh.CreateShortcut($shortcutPath)
             $shortcut.TargetPath = $powerPointExe
@@ -1426,10 +1494,41 @@ function Reset-TaskbarPinsKeepFileExplorerAndPinPowerPoint {
         }
     }
 
+    $wmpExe = Find-WindowsMediaPlayerExe
+    if (-not $wmpExe) {
+        Write-Log "Windows Media Player Legacy executable not found. Could not pin Windows Media Player."
+    }
+
+    Get-ChildItem -Path $taskbarPinnedFolder -Filter "Windows Media Player*.lnk" -Force -ErrorAction SilentlyContinue | ForEach-Object {
+        try {
+            Write-Log "Removing duplicate Windows Media Player taskbar shortcut before recreating canonical shortcut: $($_.FullName)"
+            Remove-Item -Path $_.FullName -Force -ErrorAction SilentlyContinue
+        }
+        catch {
+            Write-Log "Could not remove duplicate Windows Media Player shortcut $($_.FullName): $($_.Exception.Message)"
+        }
+    }
+
+    $wmpShortcutPath = Join-Path $taskbarPinnedFolder "Windows Media Player Legacy.lnk"
+    if ($wsh -and $wmpExe) {
+        try {
+            $wmpShortcut = $wsh.CreateShortcut($wmpShortcutPath)
+            $wmpShortcut.TargetPath = $wmpExe
+            $wmpShortcut.WorkingDirectory = Split-Path $wmpExe -Parent
+            $wmpShortcut.IconLocation = "$wmpExe,0"
+            $wmpShortcut.Description = "Windows Media Player Legacy"
+            $wmpShortcut.Save()
+            Write-Log "Created canonical Windows Media Player Legacy shortcut in taskbar pinned folder: $wmpShortcutPath"
+        }
+        catch {
+            Write-Log "Could not create Windows Media Player Legacy taskbar shortcut: $($_.Exception.Message)"
+        }
+    }
+
     # Best-effort shell verb pin. On newer Windows 10/11 builds this verb is often hidden/blocked.
     try {
         $shell = New-Object -ComObject Shell.Application
-        foreach ($pinPath in @($fileExplorerShortcutPath, $shortcutPath)) {
+        foreach ($pinPath in @($fileExplorerShortcutPath, $shortcutPath, $wmpShortcutPath)) {
             if (-not (Test-Path $pinPath)) { continue }
             $folder = $shell.Namespace((Split-Path $pinPath -Parent))
             $item = $folder.ParseName((Split-Path $pinPath -Leaf))
@@ -1484,8 +1583,8 @@ if ($currentUser -ine $TargetUsername) {
 Write-Log "First-logon provisioning started for $TargetUsername."
 Remove-EdgeDesktopShortcuts
 Set-ChromeDefaultBrowserBestEffort
-Reset-TaskbarPinsKeepFileExplorerAndPinPowerPoint
-Configure-TaskbarLayoutPolicyForFileExplorerAndPowerPoint
+Reset-TaskbarPinsKeepFileExplorerAndPinPowerPointAndWmp
+Configure-TaskbarLayoutPolicyForFileExplorerPowerPointAndWmp
 Disable-TeamsStartupForCurrentUser
 Configure-CurrentUserTaskbarAndActiveContent
 Invoke-WingetInstallWithTimeout -PackageId "Spotify.Spotify" -FriendlyName "Spotify" -InstalledDisplayNamePattern "^Spotify" -Silent $true -TimeoutSeconds 1800
