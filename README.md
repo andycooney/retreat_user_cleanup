@@ -1,4 +1,4 @@
-# Prepare-LocalAdminMachine-v27.ps1
+# Prepare-LocalAdminMachine-v28.ps1
 
 PowerShell provisioning script for preparing a Windows computer for a local `retreat`-style administrator/autologon user profile.
 
@@ -11,37 +11,49 @@ This script is designed for kiosk, presentation, event, retreat, or shared-use m
 ## Current version
 
 ```text
-Prepare-LocalAdminMachine-v27.ps1
+Prepare-LocalAdminMachine-v28.ps1
 ```
 
 Matching README:
 
 ```text
-README-Prepare-LocalAdminMachine-v27.md
+README-Prepare-LocalAdminMachine-v28.md
 ```
 
 ---
 
-## v27 wallpaper reliability update
+## v28 temp-folder and compact-wallpaper update
 
-Version v27 strengthens the generated desktop wallpaper step. It now:
+Version v28 addresses the latest cleanup pass:
 
-- Logs the target wallpaper path, canvas size, selected font, and generated file size.
-- Writes the wallpaper setting to both the normal per-user desktop registry keys and a per-user wallpaper policy fallback.
-- Uses `SystemParametersInfo` plus `UpdatePerUserSystemParameters` to force Windows to reload the wallpaper immediately.
-- Reapplies the generated wallpaper after the Explorer restart request so Spotlight or shell refreshes are less likely to replace it.
-- Keeps Spotlight/active-content disablement reinforced immediately before applying the generated wallpaper.
+- Keeps provisioning-generated/staged files under `C:\Temp` instead of `C:\ProgramData\DeltaProvisioning`.
+- Stages user-context Spotify through an HKCU `RunOnce` value that points to a command file stored under `C:\Temp\DeltaProvisioning`.
+- Moves the retreat working folder to `C:\Temp\retreat`.
+- Updates the File Explorer shortcut target to open `C:\Temp\retreat`.
+- Fixes the wallpaper reapply path bug that could produce an illegal path such as `C:\Tempetreat-system-info-wallpaper.jpg`.
+- Updates the wallpaper design:
+  - removes the `Retreat Computer` heading,
+  - removes the background box/panel,
+  - moves system information toward the lower-right of the screen,
+  - reduces the text size by roughly one third.
+- Updates Roboto download logic to resolve the latest GitHub release package before falling back to a pinned release asset.
 
-The generated wallpaper path remains:
+The generated wallpaper path is:
 
 ```text
 C:\Temp\retreat-system-info-wallpaper.jpg
 ```
 
-The first-logon/user-context log path remains:
+The user-context log path is:
 
 ```text
 C:\Temp\first-logon-<username>.log
+```
+
+Provisioning support files are staged under:
+
+```text
+C:\Temp\DeltaProvisioning
 ```
 
 ---
@@ -52,7 +64,7 @@ C:\Temp\first-logon-<username>.log
 Set-ExecutionPolicy Bypass -Scope Process -Force
 
 powershell.exe -NoProfile -ExecutionPolicy Bypass `
-  -File "$env:USERPROFILE\Downloads\Prepare-LocalAdminMachine-v27.ps1" `
+  -File "$env:USERPROFILE\Downloads\Prepare-LocalAdminMachine-v28.ps1" `
   -LocalAdminUser "retreat" `
   -LocalAdminPassword "YourPasswordHere"
 ```
@@ -63,7 +75,7 @@ With a computer rename:
 Set-ExecutionPolicy Bypass -Scope Process -Force
 
 powershell.exe -NoProfile -ExecutionPolicy Bypass `
-  -File "$env:USERPROFILE\Downloads\Prepare-LocalAdminMachine-v27.ps1" `
+  -File "$env:USERPROFILE\Downloads\Prepare-LocalAdminMachine-v28.ps1" `
   -LocalAdminUser "retreat" `
   -LocalAdminPassword "YourPasswordHere" `
   -NewComputerName "RETREAT-001"
@@ -75,7 +87,7 @@ Optional domain-unjoin credential:
 $cred = Get-Credential
 
 powershell.exe -NoProfile -ExecutionPolicy Bypass `
-  -File "$env:USERPROFILE\Downloads\Prepare-LocalAdminMachine-v27.ps1" `
+  -File "$env:USERPROFILE\Downloads\Prepare-LocalAdminMachine-v28.ps1" `
   -LocalAdminUser "retreat" `
   -LocalAdminPassword "YourPasswordHere" `
   -DomainUnjoinCredential $cred
@@ -110,9 +122,9 @@ The script has two main areas of responsibility:
    Runs elevated and handles machine-level configuration.
 
 2. **User/profile provisioning phase**
-   A helper script is staged under `C:\ProgramData\DeltaProvisioning`. If the bootstrap script is already running as the target user, the script runs the user/profile cleanup immediately from the elevated session. This includes taskbar layout, desktop shortcut cleanup/rebuild, Chrome/Slido checks, Teams cleanup, per-user UI cleanup, and generated wallpaper setup.
+   A helper script is staged under `C:\Temp\DeltaProvisioning`. If the bootstrap script is already running as the target user, the script runs the user/profile cleanup immediately from the elevated session. This includes taskbar layout, desktop shortcut cleanup/rebuild, Chrome/Slido checks, Teams cleanup, per-user UI cleanup, and generated wallpaper setup.
 
-Spotify is handled differently because the Spotify installer often does not behave correctly from an elevated Administrator context. Spotify is staged to run later from the target user's normal non-elevated Startup context. If Spotify is already installed, the Startup trigger is removed. If Spotify is not installed, the Startup trigger remains and retries at the next normal sign-in.
+Spotify is handled differently because the Spotify installer often does not behave correctly from an elevated Administrator context. Spotify is staged to run later from the target user's normal non-elevated Startup context. If Spotify is already installed, the RunOnce trigger is removed. If Spotify is not installed, the RunOnce trigger remains and retries at the next normal sign-in.
 
 ---
 
@@ -121,17 +133,17 @@ Spotify is handled differently because the Spotify installer often does not beha
 The script may create the following files and folders:
 
 ```text
-C:\retreat
+C:\Temp\retreat
 C:\Temp\first-logon-<username>.log
 C:\Temp\retreat-computer-name.txt
 C:\Temp\retreat-system-info-wallpaper.jpg
 C:\Temp\RobotoFontInstall\
-C:\ProgramData\DeltaProvisioning\FirstLogon-For-<username>.ps1
-C:\ProgramData\DeltaProvisioning\TaskbarLayout-<username>.xml
+C:\Temp\DeltaProvisioning\FirstLogon-For-<username>.ps1
+C:\Temp\DeltaProvisioning\TaskbarLayout-<username>.xml
 C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Startup\Run-FirstLogon-Provisioning-For-<username>.cmd
 ```
 
-The Startup trigger is primarily for the Spotify user-context install/retry path. It is removed when Spotify is already installed or after Spotify installs successfully from a normal non-elevated target-user logon.
+The RunOnce trigger is primarily for the Spotify user-context install/retry path. It is removed when Spotify is already installed or after Spotify installs successfully from a normal non-elevated target-user logon.
 
 ---
 
@@ -274,7 +286,7 @@ When run for the target user, the staged user/profile script handles:
 
 - Removes existing desktop icons/items from the current user's desktop and the Public Desktop.
 - Creates clean desktop shortcuts for:
-  - File Explorer, opening `C:\retreat`
+  - File Explorer, opening `C:\Temp\retreat`
   - PowerPoint
   - Windows Media Player Legacy
   - Google Chrome
@@ -284,7 +296,7 @@ When run for the target user, the staged user/profile script handles:
 Applies a taskbar layout intended to show:
 
 ```text
-File Explorer -> opens C:\retreat
+File Explorer -> opens C:\Temp\retreat
 PowerPoint
 Windows Media Player Legacy
 Google Chrome
@@ -298,7 +310,7 @@ The script:
 - Writes a taskbar layout XML to:
 
 ```text
-C:\ProgramData\DeltaProvisioning\TaskbarLayout-<username>.xml
+C:\Temp\DeltaProvisioning\TaskbarLayout-<username>.xml
 ```
 
 - Uses a taskbar layout policy with `PinListPlacement="Replace"`.
@@ -311,10 +323,10 @@ Some Windows 10/11 builds do not apply taskbar layout changes until sign out/sig
 - Creates the File Explorer taskbar and desktop shortcut so it opens:
 
 ```text
-C:\retreat
+C:\Temp\retreat
 ```
 
-Windows does not natively support setting every new Explorer window to an arbitrary folder such as `C:\retreat`, so the shortcut target is the reliable behavior.
+Windows does not natively support setting every new Explorer window to an arbitrary folder such as `C:\Temp\retreat`, so the shortcut target is the reliable behavior.
 
 ### Chrome
 
@@ -336,8 +348,8 @@ Windows does not natively support setting every new Explorer window to an arbitr
 Spotify is special-cased:
 
 - It is not installed from the elevated Administrator process.
-- A Startup trigger runs Spotify installation from the target user's normal, non-elevated logon context.
-- If Spotify installs successfully, the Startup trigger removes itself.
+- A RunOnce trigger runs Spotify installation from the target user's normal, non-elevated logon context.
+- If Spotify installs successfully, the RunOnce trigger removes itself.
 - If Spotify is already installed, the trigger is removed.
 
 ### Teams cleanup
@@ -407,7 +419,7 @@ C:\Temp\first-logon-retreat.log
 The script may also write supporting provisioning files under:
 
 ```text
-C:\ProgramData\DeltaProvisioning
+C:\Temp\DeltaProvisioning
 ```
 
 ---
@@ -488,7 +500,7 @@ Get-ChildItem C:\Windows\Fonts\Roboto* -ErrorAction SilentlyContinue |
     Select-Object Name, Length
 ```
 
-v27 does not skip Roboto installation merely because the `Roboto` family name exists. It checks for a complete variable-font pair or the core static weights before considering the family complete.
+v28 does not skip Roboto installation merely because the `Roboto` family name exists. It checks for a complete variable-font pair or the core static weights before considering the family complete.
 
 ### Check first-logon/user-context log
 
@@ -515,14 +527,14 @@ Select-Object DisplayName, DisplayVersion, Publisher
 When this script is iterated, keep the script and README versions in sync. For example:
 
 ```text
-Prepare-LocalAdminMachine-v27.ps1
-README-Prepare-LocalAdminMachine-v27.md
+Prepare-LocalAdminMachine-v28.ps1
+README-Prepare-LocalAdminMachine-v28.md
 ```
 
 
-## v27 notes
+## v28 notes
 
-If the wallpaper still does not show after running v27, check:
+If the wallpaper still does not show after running v28, check:
 
 ```powershell
 Test-Path C:\Temp\retreat-system-info-wallpaper.jpg

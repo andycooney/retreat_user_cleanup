@@ -1,4 +1,4 @@
-# Script version: 2026-06-24-v27-force-generated-wallpaper
+# Script version: 2026-06-24-v28-temp-only-compact-wallpaper
 #requires -RunAsAdministrator
 <#
 Purpose:
@@ -11,7 +11,7 @@ Purpose:
 - Run Chrome, Slido, taskbar, desktop, and per-user UI cleanup from the main script when running as the target user; stage only Spotify for a regular non-elevated target-user logon; and install Windows Media Player Legacy
 - Disable screensaver
 - Apply machine policies for active content now; stage per-user taskbar/Spotlight/default-browser/taskbar-pin cleanup for first target-user logon; keep File Explorer pinned and pin PowerPoint, Windows Media Player Legacy, and Google Chrome
-- Create C:\retreat
+- Create C:\Temp\retreat
 - Optionally rename the computer with -NewComputerName
 - Install the full Roboto font family from Google Fonts
 - Generate a static system-information wallpaper using Roboto
@@ -857,9 +857,9 @@ function Configure-MachineActiveContentPolicies {
 
 
 function Ensure-RetreatFolder {
-    Write-Step "Creating C:\retreat folder"
-    New-Item -Path "C:\retreat" -ItemType Directory -Force | Out-Null
-    Write-Host "Ensured folder exists: C:\retreat"
+    Write-Step "Creating C:\Temp\retreat folder"
+    New-Item -Path "C:\Temp\retreat" -ItemType Directory -Force | Out-Null
+    Write-Host "Ensured folder exists: C:\Temp\retreat"
 }
 
 function Test-RobotoFontFamilyComplete {
@@ -921,7 +921,7 @@ function Ensure-RobotoFontFamily {
     $zipPath = Join-Path $tempRoot "roboto.zip"
     $extractPath = Join-Path $tempRoot "extracted"
     $fontRegistryPath = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts"
-    $fontDownloadUrl = "https://fonts.google.com/download?family=Roboto"
+    $fontDownloadUrl = $null
 
     try {
         New-Item -Path $tempRoot -ItemType Directory -Force | Out-Null
@@ -930,17 +930,28 @@ function Ensure-RobotoFontFamily {
         }
         New-Item -Path $extractPath -ItemType Directory -Force | Out-Null
 
-        Write-Host "Downloading Roboto from Google Fonts."
+        Write-Host "Resolving latest Roboto release package from GitHub."
         $oldProgressPreference = $ProgressPreference
         $ProgressPreference = 'SilentlyContinue'
         try {
+            try {
+                $release = Invoke-RestMethod -Uri "https://api.github.com/repos/googlefonts/roboto-3-classic/releases/latest" -UseBasicParsing -ErrorAction Stop
+                $asset = $release.assets | Where-Object { $_.name -like "Roboto_*.zip" } | Select-Object -First 1
+                if ($asset -and $asset.browser_download_url) { $fontDownloadUrl = $asset.browser_download_url }
+            }
+            catch {
+                Write-Warning "Could not resolve latest Roboto release through GitHub API: $($_.Exception.Message)"
+            }
+            if (-not $fontDownloadUrl) { $fontDownloadUrl = "https://github.com/googlefonts/roboto-3-classic/releases/download/v3.016/Roboto_v3.016.zip" }
+            Write-Host "Downloading Roboto package: $fontDownloadUrl"
             Invoke-WebRequest -Uri $fontDownloadUrl -OutFile $zipPath -UseBasicParsing -ErrorAction Stop
         }
         finally {
             $ProgressPreference = $oldProgressPreference
         }
 
-        Expand-Archive -Path $zipPath -DestinationPath $extractPath -Force
+        try { Expand-Archive -Path $zipPath -DestinationPath $extractPath -Force -ErrorAction Stop }
+        catch { throw "Downloaded Roboto package was not a valid zip archive from $fontDownloadUrl. $($_.Exception.Message)" }
 
         $fontFiles = Get-ChildItem -Path $extractPath -Recurse -Include *.ttf,*.otf -ErrorAction SilentlyContinue |
             Where-Object { $_.BaseName -like "Roboto*" }
@@ -1022,7 +1033,7 @@ function Configure-WindowsHelloAndSetupExperienceSuppression {
 function Configure-ChromeDefaultBrowserForNewUsers {
     Write-Step "Staging Chrome as default browser for new user profiles"
 
-    $provisioningFolder = Join-Path $env:ProgramData "DeltaProvisioning"
+    $provisioningFolder = "C:\Temp\DeltaProvisioning"
     New-Item -Path $provisioningFolder -ItemType Directory -Force | Out-Null
 
     $assocPath = Join-Path $provisioningFolder "ChromeDefaultAssociations.xml"
@@ -1058,16 +1069,15 @@ function Stage-FirstLogonProvisioning {
 
     Write-Step "Staging first-logon provisioning for target user"
 
-    $provisioningFolder = Join-Path $env:ProgramData "DeltaProvisioning"
-    $startupFolder = Join-Path $env:ProgramData "Microsoft\Windows\Start Menu\Programs\Startup"
+    $provisioningFolder = "C:\Temp\DeltaProvisioning"
     $firstLogonScript = Join-Path $provisioningFolder "FirstLogon-For-$Username.ps1"
-    $firstLogonCmd = Join-Path $startupFolder "Run-FirstLogon-Provisioning-For-$Username.cmd"
+    $firstLogonCmd = Join-Path $provisioningFolder "Run-FirstLogon-Provisioning-For-$Username.cmd"
     $tempFolder = "C:\Temp"
     $logPath = Join-Path $tempFolder "first-logon-$Username.log"
+    $runOnceName = "DeltaProvisioning-Spotify-$Username"
 
     New-Item -Path $provisioningFolder -ItemType Directory -Force | Out-Null
     New-Item -Path $tempFolder -ItemType Directory -Force | Out-Null
-    New-Item -Path $startupFolder -ItemType Directory -Force | Out-Null
 
     $firstLogonContent = @'
 param(
@@ -1076,7 +1086,7 @@ param(
 )
 
 $ErrorActionPreference = "Continue"
-$RetreatFolder = "C:\retreat"
+$RetreatFolder = "C:\Temp\retreat"
 
 function Write-Log {
     param([string]$Message)
@@ -1568,7 +1578,7 @@ function Reset-DesktopIconsAndCreateProvisionedShortcuts {
 
     $explorerExe = "$env:WINDIR\explorer.exe"
     if (Test-Path $explorerExe) {
-        New-OrUpdateShortcut -ShortcutPath (Join-Path $userDesktop "File Explorer.lnk") -TargetPath $explorerExe -Arguments '"C:\retreat"' -WorkingDirectory $RetreatFolder -IconLocation "$explorerExe,0" -Description "File Explorer" | Out-Null
+        New-OrUpdateShortcut -ShortcutPath (Join-Path $userDesktop "File Explorer.lnk") -TargetPath $explorerExe -Arguments '"C:\Temp\retreat"' -WorkingDirectory $RetreatFolder -IconLocation "$explorerExe,0" -Description "File Explorer" | Out-Null
     }
 
     $powerPointExe = Find-PowerPointExe
@@ -1607,7 +1617,7 @@ function Configure-TaskbarLayoutPolicyForProvisionedApps {
         $wshForExplorerPolicy = New-Object -ComObject WScript.Shell
         $explorerPolicyShortcut = $wshForExplorerPolicy.CreateShortcut($fileExplorerPolicyShortcut)
         $explorerPolicyShortcut.TargetPath = "$env:WINDIR\explorer.exe"
-        $explorerPolicyShortcut.Arguments = '"C:\retreat"'
+        $explorerPolicyShortcut.Arguments = '"C:\Temp\retreat"'
         $explorerPolicyShortcut.WorkingDirectory = $RetreatFolder
         $explorerPolicyShortcut.IconLocation = "$env:WINDIR\explorer.exe,0"
         $explorerPolicyShortcut.Description = "File Explorer"
@@ -1620,7 +1630,7 @@ function Configure-TaskbarLayoutPolicyForProvisionedApps {
 
     # Best-effort Explorer preference. Windows supports LaunchTo values such as Home/This PC,
     # but not a native per-user default of an arbitrary folder. The pinned shortcut above is
-    # therefore the reliable way to make the taskbar Explorer button open C:\retreat.
+    # therefore the reliable way to make the taskbar Explorer button open C:\Temp\retreat.
     $advancedPathForExplorer = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced"
     Set-RegistryDWordValue -Path $advancedPathForExplorer -Name "LaunchTo" -Value 1 | Out-Null
     Write-Log "Set File Explorer launch preference to This PC where supported; taskbar shortcut directly targets $RetreatFolder."
@@ -1723,7 +1733,7 @@ function Configure-TaskbarLayoutPolicyForProvisionedApps {
     }
     $taskbarPinsXml = $taskbarAppLines -join "`r`n"
 
-    $layoutPath = Join-Path $env:ProgramData "DeltaProvisioning\TaskbarLayout-$TargetUsername.xml"
+    $layoutPath = "C:\Temp\DeltaProvisioning\TaskbarLayout-$TargetUsername.xml"
     New-Item -Path (Split-Path $layoutPath -Parent) -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
 
     $xml = @"
@@ -1836,7 +1846,7 @@ function Reset-TaskbarPinsForProvisionedApps {
         try {
             $fileExplorerShortcut = $wsh.CreateShortcut($fileExplorerShortcutPath)
             $fileExplorerShortcut.TargetPath = "$env:WINDIR\explorer.exe"
-            $fileExplorerShortcut.Arguments = '"C:\retreat"'
+            $fileExplorerShortcut.Arguments = '"C:\Temp\retreat"'
             $fileExplorerShortcut.WorkingDirectory = $RetreatFolder
             $fileExplorerShortcut.IconLocation = "$env:WINDIR\explorer.exe,0"
             $fileExplorerShortcut.Description = "File Explorer"
@@ -2028,7 +2038,7 @@ function Ensure-RobotoFontFamilyForWallpaper {
     $zipPath = Join-Path $tempRoot "roboto.zip"
     $extractPath = Join-Path $tempRoot "extracted"
     $fontRegistryPath = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts"
-    $fontDownloadUrl = "https://fonts.google.com/download?family=Roboto"
+    $fontDownloadUrl = $null
 
     try {
         New-Item -Path $tempRoot -ItemType Directory -Force | Out-Null
@@ -2040,13 +2050,24 @@ function Ensure-RobotoFontFamilyForWallpaper {
         $oldProgressPreference = $ProgressPreference
         $ProgressPreference = 'SilentlyContinue'
         try {
+            try {
+                $release = Invoke-RestMethod -Uri "https://api.github.com/repos/googlefonts/roboto-3-classic/releases/latest" -UseBasicParsing -ErrorAction Stop
+                $asset = $release.assets | Where-Object { $_.name -like "Roboto_*.zip" } | Select-Object -First 1
+                if ($asset -and $asset.browser_download_url) { $fontDownloadUrl = $asset.browser_download_url }
+            }
+            catch {
+                Write-Log "Could not resolve latest Roboto release through GitHub API: $($_.Exception.Message)"
+            }
+            if (-not $fontDownloadUrl) { $fontDownloadUrl = "https://github.com/googlefonts/roboto-3-classic/releases/download/v3.016/Roboto_v3.016.zip" }
+            Write-Log "Downloading Roboto package: $fontDownloadUrl"
             Invoke-WebRequest -Uri $fontDownloadUrl -OutFile $zipPath -UseBasicParsing -ErrorAction Stop
         }
         finally {
             $ProgressPreference = $oldProgressPreference
         }
 
-        Expand-Archive -Path $zipPath -DestinationPath $extractPath -Force
+        try { Expand-Archive -Path $zipPath -DestinationPath $extractPath -Force -ErrorAction Stop }
+        catch { throw "Downloaded Roboto package was not a valid zip archive from $fontDownloadUrl. $($_.Exception.Message)" }
         $fontFiles = Get-ChildItem -Path $extractPath -Recurse -Include *.ttf,*.otf -ErrorAction SilentlyContinue |
             Where-Object { $_.BaseName -like "Roboto*" }
 
@@ -2258,34 +2279,22 @@ function New-RetreatInfoWallpaper {
         $graphics.TextRenderingHint = [System.Drawing.Text.TextRenderingHint]::ClearTypeGridFit
 
         $background = [System.Drawing.Color]::FromArgb(18, 22, 28)
-        $panel = [System.Drawing.Color]::FromArgb(36, 42, 52)
-        $accent = [System.Drawing.Color]::FromArgb(120, 160, 220)
         $white = [System.Drawing.Color]::FromArgb(245, 247, 250)
-        $muted = [System.Drawing.Color]::FromArgb(190, 198, 210)
+        $muted = [System.Drawing.Color]::FromArgb(176, 184, 196)
+        $shadow = [System.Drawing.Color]::FromArgb(110, 0, 0, 0)
 
         $graphics.Clear($background)
-        $brushPanel = New-Object System.Drawing.SolidBrush($panel)
-        $brushAccent = New-Object System.Drawing.SolidBrush($accent)
         $brushWhite = New-Object System.Drawing.SolidBrush($white)
         $brushMuted = New-Object System.Drawing.SolidBrush($muted)
+        $brushShadow = New-Object System.Drawing.SolidBrush($shadow)
 
-        $margin = [Math]::Max(60, [int]($width * 0.045))
-        $panelWidth = [Math]::Min(820, [int]($width * 0.48))
-        $panelHeight = 520
-        $x = $margin
-        $y = [Math]::Max(70, [int]($height * 0.12))
-
-        $graphics.FillRectangle($brushPanel, $x, $y, $panelWidth, $panelHeight)
-        $graphics.FillRectangle($brushAccent, $x, $y, 8, $panelHeight)
-
-        $titleFont = New-Object System.Drawing.Font($fontName, 32, [System.Drawing.FontStyle]::Bold)
-        $labelFont = New-Object System.Drawing.Font($fontName, 14, [System.Drawing.FontStyle]::Regular)
-        $valueFont = New-Object System.Drawing.Font($fontName, 20, [System.Drawing.FontStyle]::Regular)
-        $smallFont = New-Object System.Drawing.Font($fontName, 11, [System.Drawing.FontStyle]::Regular)
-
-        $cursorY = $y + 38
-        $graphics.DrawString("Retreat Computer", $titleFont, $brushWhite, $x + 36, $cursorY)
-        $cursorY += 70
+        # Compact, no heading, no background panel. Position near the lower-right corner.
+        $margin = [Math]::Max(54, [int]($width * 0.035))
+        $blockWidth = [Math]::Min(620, [int]($width * 0.36))
+        $labelFont = New-Object System.Drawing.Font($fontName, 9, [System.Drawing.FontStyle]::Regular)
+        $valueFont = New-Object System.Drawing.Font($fontName, 14, [System.Drawing.FontStyle]::Regular)
+        $smallFont = New-Object System.Drawing.Font($fontName, 8, [System.Drawing.FontStyle]::Regular)
+        $rowHeight = 42
 
         $rows = @(
             @{ Label = "Computer Name"; Value = (Get-ComputerNameForWallpaper) },
@@ -2297,24 +2306,31 @@ function New-RetreatInfoWallpaper {
             @{ Label = "Operating System"; Value = $osCaption }
         )
 
+        $totalHeight = ($rows.Count * $rowHeight) + 22
+        $x = [Math]::Max($margin, $width - $blockWidth - $margin)
+        $cursorY = [Math]::Max($margin, $height - $totalHeight - $margin)
+
         foreach ($row in $rows) {
-            $graphics.DrawString($row.Label, $labelFont, $brushMuted, $x + 40, $cursorY)
-            $graphics.DrawString([string]$row.Value, $valueFont, $brushWhite, $x + 40, $cursorY + 22)
-            $cursorY += 62
+            $label = [string]$row.Label
+            $value = [string]$row.Value
+            $graphics.DrawString($label, $labelFont, $brushShadow, $x + 1, $cursorY + 1)
+            $graphics.DrawString($label, $labelFont, $brushMuted, $x, $cursorY)
+            $graphics.DrawString($value, $valueFont, $brushShadow, $x + 1, $cursorY + 15)
+            $graphics.DrawString($value, $valueFont, $brushWhite, $x, $cursorY + 14)
+            $cursorY += $rowHeight
         }
 
         $stamp = "Generated {0}" -f (Get-Date -Format "yyyy-MM-dd HH:mm")
-        $graphics.DrawString($stamp, $smallFont, $brushMuted, $x + 40, $y + $panelHeight - 34)
+        $graphics.DrawString($stamp, $smallFont, $brushShadow, $x + 1, $cursorY + 1)
+        $graphics.DrawString($stamp, $smallFont, $brushMuted, $x, $cursorY)
 
         $bitmap.Save($wallpaperPath, [System.Drawing.Imaging.ImageFormat]::Jpeg)
 
         $graphics.Dispose()
         $bitmap.Dispose()
-        $brushPanel.Dispose()
-        $brushAccent.Dispose()
         $brushWhite.Dispose()
         $brushMuted.Dispose()
-        $titleFont.Dispose()
+        $brushShadow.Dispose()
         $labelFont.Dispose()
         $valueFont.Dispose()
         $smallFont.Dispose()
@@ -2381,7 +2397,7 @@ if (-not (Test-CurrentProcessIsElevated)) {
     Invoke-WingetInstallWithTimeout -PackageId "Spotify.Spotify" -FriendlyName "Spotify" -InstalledDisplayNamePattern "^Spotify" -Silent $true -TimeoutSeconds 1800
 
     if (-not (Test-AppInstalledByDisplayName -DisplayNamePattern "^Spotify")) {
-        Write-Log "Spotify is still not installed. Leaving Startup trigger in place so it can retry at the next normal user logon."
+        Write-Log "Spotify is still not installed. Leaving RunOnce trigger in place so it can retry at the next normal user logon."
         exit 1
     }
 
@@ -2416,13 +2432,14 @@ catch {
 # Re-apply after Explorer restart request in case shell policy/Spotlight rewrote the desktop settings during cleanup.
 try {
     Start-Sleep -Seconds 2
-    Apply-RetreatInfoWallpaper -WallpaperPath "C:\Tempetreat-system-info-wallpaper.jpg" | Out-Null
+    $wallpaperPath = Join-Path "C:\Temp" "retreat-system-info-wallpaper.jpg"
+    Apply-RetreatInfoWallpaper -WallpaperPath $wallpaperPath | Out-Null
 }
 catch {
     Write-Log "Could not re-apply wallpaper after Explorer restart: $($_.Exception.Message)"
 }
 
-Write-Log "Elevated user/profile provisioning complete. Spotify Startup trigger remains only if Spotify is not installed."
+Write-Log "Elevated user/profile provisioning complete. Spotify RunOnce trigger remains only if Spotify is not installed."
 exit 0
 '@
 
@@ -2440,8 +2457,17 @@ exit /b 0
 
     Set-Content -Path $firstLogonCmd -Value $cmdContent -Encoding ASCII -Force
 
+    try {
+        New-Item -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\RunOnce" -Force | Out-Null
+        Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\RunOnce" -Name $runOnceName -Value "`"$firstLogonCmd`"" -Type String
+        Write-Host "Spotify user-context RunOnce trigger staged in HKCU: $runOnceName"
+    }
+    catch {
+        Write-Warning "Could not stage HKCU RunOnce trigger for Spotify: $($_.Exception.Message)"
+    }
+
     Write-Host "First-logon PowerShell staged at: $firstLogonScript"
-    Write-Host "First-logon Startup trigger staged at: $firstLogonCmd"
+    Write-Host "First-logon command staged at: $firstLogonCmd"
     Write-Host "First-logon log will be written to: $logPath"
 }
 
@@ -2452,12 +2478,12 @@ function Invoke-StagedFirstLogonIfCurrentUser {
     Write-Step "Checking staged user/profile provisioning trigger"
 
     $currentUser = $env:USERNAME
-    $provisioningFolder = Join-Path $env:ProgramData "DeltaProvisioning"
-    $startupFolder = Join-Path $env:ProgramData "Microsoft\Windows\Start Menu\Programs\Startup"
+    $provisioningFolder = "C:\Temp\DeltaProvisioning"
     $firstLogonScript = Join-Path $provisioningFolder "FirstLogon-For-$Username.ps1"
-    $firstLogonCmd = Join-Path $startupFolder "Run-FirstLogon-Provisioning-For-$Username.cmd"
+    $firstLogonCmd = Join-Path $provisioningFolder "Run-FirstLogon-Provisioning-For-$Username.cmd"
     $tempFolder = "C:\Temp"
     $logPath = Join-Path $tempFolder "first-logon-$Username.log"
+    $runOnceName = "DeltaProvisioning-Spotify-$Username"
 
     if (-not (Test-Path $firstLogonScript)) {
         Write-Warning "Staged user/profile script was not found at $firstLogonScript. It cannot run."
@@ -2465,13 +2491,13 @@ function Invoke-StagedFirstLogonIfCurrentUser {
     }
 
     if (-not (Test-Path $firstLogonCmd)) {
-        Write-Warning "Spotify Startup trigger was not found at $firstLogonCmd. Re-stage the script if Spotify user-context install is needed."
+        Write-Warning "Spotify user-context command was not found at $firstLogonCmd. Re-stage the script if Spotify user-context install is needed."
         return
     }
 
     if ($currentUser -ieq $Username) {
         Write-Host "Already running as target user '$Username'. Running user/profile cleanup now from the main elevated process."
-        Write-Host "Spotify remains staged separately for the next normal non-elevated user logon."
+        Write-Host "Spotify remains staged separately through HKCU RunOnce for the next normal non-elevated user logon."
 
         $args = @(
             "-NoProfile",
@@ -2491,14 +2517,15 @@ function Invoke-StagedFirstLogonIfCurrentUser {
 
         if (Test-AppInstalledByDisplayName -DisplayNamePattern "^Spotify") {
             Remove-Item -Path $firstLogonCmd -Force -ErrorAction SilentlyContinue
-            Write-Host "Spotify is already installed. Removed Spotify Startup trigger."
+            Remove-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\RunOnce" -Name $runOnceName -ErrorAction SilentlyContinue
+            Write-Host "Spotify is already installed. Removed Spotify RunOnce trigger and command."
         }
         else {
-            Write-Host "Spotify is not installed. Startup trigger remains for the next normal non-elevated logon: $firstLogonCmd"
+            Write-Host "Spotify is not installed. RunOnce trigger remains for the next normal non-elevated logon; command: $firstLogonCmd"
         }
     }
     else {
-        Write-Host "Current user '$currentUser' is not target user '$Username'. User/profile cleanup and Spotify install will run when $Username logs in."
+        Write-Host "Current user '$currentUser' is not target user '$Username'. User/profile cleanup will run when $Username logs in only if the HKCU RunOnce trigger is present for that user."
     }
 }
 
