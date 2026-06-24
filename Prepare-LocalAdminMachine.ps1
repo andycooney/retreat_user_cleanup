@@ -8,7 +8,7 @@ Purpose:
 - Unjoin domain if domain joined
 - Disable startup items, including Teams and OneDrive startup hooks
 - Remove Cisco AnyConnect / Cisco Secure Client, Duo Windows Logon, and ThreatLocker if present
-- Stage Spotify, Slido, Chrome, and per-user UI cleanup to run at the next normal non-elevated target-user logon, and install Windows Media Player Legacy
+- Run Chrome, Slido, taskbar, desktop, and per-user UI cleanup from the main script when running as the target user; stage only Spotify for a regular non-elevated target-user logon; and install Windows Media Player Legacy
 - Disable screensaver
 - Apply machine policies for active content now; stage per-user taskbar/Spotlight/default-browser/taskbar-pin cleanup for first target-user logon; keep File Explorer pinned and pin PowerPoint, Windows Media Player Legacy, and Google Chrome
 - Create C:\retreat
@@ -1810,16 +1810,26 @@ if ($currentUser -ine $TargetUsername) {
     exit 0
 }
 
-Write-Log "First-logon provisioning started for $TargetUsername."
+Write-Log "Provisioning script started for $TargetUsername."
+
+if (-not (Test-CurrentProcessIsElevated)) {
+    Write-Log "Regular non-elevated target-user context detected. Running Spotify-only installer."
+    Invoke-WingetInstallWithTimeout -PackageId "Spotify.Spotify" -FriendlyName "Spotify" -InstalledDisplayNamePattern "^Spotify" -Silent $true -TimeoutSeconds 1800
+
+    if (-not (Test-AppInstalledByDisplayName -DisplayNamePattern "^Spotify")) {
+        Write-Log "Spotify is still not installed. Leaving Startup trigger in place so it can retry at the next normal user logon."
+        exit 1
+    }
+
+    Write-Log "Spotify user-context provisioning complete."
+    exit 0
+}
+
+Write-Log "Elevated target-user context detected. Running all user/profile cleanup except Spotify."
 Remove-EdgeDesktopShortcuts
 Disable-WindowsHelloAndSetupPromptsForCurrentUser
 Invoke-WingetInstallWithTimeout -PackageId "Google.Chrome" -FriendlyName "Google Chrome" -InstalledDisplayNamePattern "^Google Chrome" -Silent $true -TimeoutSeconds 1800
-if (Test-CurrentProcessIsElevated) {
-    Write-Log "Current process is elevated. Skipping Spotify because the Spotify installer must run as the regular interactive user. It will retry at the next normal logon if this Startup trigger remains."
-}
-else {
-    Invoke-WingetInstallWithTimeout -PackageId "Spotify.Spotify" -FriendlyName "Spotify" -InstalledDisplayNamePattern "^Spotify" -Silent $true -TimeoutSeconds 1800
-}
+Write-Log "Skipping Spotify in elevated context. Spotify is staged separately for normal non-elevated user logon."
 Invoke-WingetInstallWithTimeout -PackageId "Slido.Slido" -FriendlyName "Slido for PowerPoint" -InstalledDisplayNamePattern "^Slido" -Silent $false -TimeoutSeconds 1800
 Set-ChromeDefaultBrowserBestEffort
 Reset-TaskbarPinsForProvisionedApps
@@ -1837,12 +1847,8 @@ catch {
     Write-Log "Could not restart Explorer: $($_.Exception.Message)"
 }
 
-if (-not (Test-AppInstalledByDisplayName -DisplayNamePattern "^Spotify")) {
-    Write-Log "Spotify is still not installed. Leaving Startup trigger in place so it can retry at the next normal user logon."
-    exit 1
-}
-
-Write-Log "First-logon provisioning complete."
+Write-Log "Elevated user/profile provisioning complete. Spotify Startup trigger remains only if Spotify is not installed."
+exit 0
 '@
 
     Set-Content -Path $firstLogonScript -Value $firstLogonContent -Encoding UTF8 -Force
@@ -1868,7 +1874,7 @@ exit /b 0
 function Invoke-StagedFirstLogonIfCurrentUser {
     param([Parameter(Mandatory)][string]$Username)
 
-    Write-Step "Checking first-logon provisioning trigger"
+    Write-Step "Checking staged user/profile provisioning trigger"
 
     $currentUser = $env:USERNAME
     $provisioningFolder = Join-Path $env:ProgramData "DeltaProvisioning"
@@ -1878,52 +1884,47 @@ function Invoke-StagedFirstLogonIfCurrentUser {
     $logPath = Join-Path $provisioningFolder "first-logon-$Username.log"
 
     if (-not (Test-Path $firstLogonScript)) {
-        Write-Warning "First-logon script was not found at $firstLogonScript. It cannot run at next logon."
+        Write-Warning "Staged user/profile script was not found at $firstLogonScript. It cannot run."
         return
     }
 
     if (-not (Test-Path $firstLogonCmd)) {
-        Write-Warning "First-logon Startup trigger was not found at $firstLogonCmd. Re-stage the script if user-context provisioning is needed."
+        Write-Warning "Spotify Startup trigger was not found at $firstLogonCmd. Re-stage the script if Spotify user-context install is needed."
         return
     }
 
     if ($currentUser -ieq $Username) {
-        Write-Host "Already running as target user '$Username'. Starting user-context provisioning through a least-privilege scheduled task."
-        Write-Host "This avoids running Spotify from the elevated Administrator process."
+        Write-Host "Already running as target user '$Username'. Running user/profile cleanup now from the main elevated process."
+        Write-Host "Spotify remains staged separately for the next normal non-elevated user logon."
 
-        $taskName = "DeltaProvisioning-FirstLogon-$Username"
-        $taskPath = "\DeltaProvisioning\"
-        $taskUser = "$env:USERDOMAIN\$env:USERNAME"
-        $taskArgs = "-NoProfile -ExecutionPolicy Bypass -File `"$firstLogonScript`" -TargetUsername `"$Username`" -LogPath `"$logPath`""
+        $args = @(
+            "-NoProfile",
+            "-ExecutionPolicy", "Bypass",
+            "-File", $firstLogonScript,
+            "-TargetUsername", $Username,
+            "-LogPath", $logPath
+        )
 
         try {
-            $existingTask = Get-ScheduledTask -TaskName $taskName -TaskPath $taskPath -ErrorAction SilentlyContinue
-            if ($existingTask) {
-                Unregister-ScheduledTask -TaskName $taskName -TaskPath $taskPath -Confirm:$false -ErrorAction SilentlyContinue
-            }
-
-            $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $taskArgs
-            $trigger = New-ScheduledTaskTrigger -AtLogOn -User $taskUser
-            $principal = New-ScheduledTaskPrincipal -UserId $taskUser -LogonType Interactive -RunLevel LeastPrivilege
-            $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 45)
-
-            Register-ScheduledTask -TaskName $taskName -TaskPath $taskPath -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description "Delta provisioning first-logon user-context task for $Username" -Force | Out-Null
-            Start-ScheduledTask -TaskName $taskName -TaskPath $taskPath
-
-            Write-Host "Started scheduled task $taskPath$taskName as $taskUser with least privileges."
-            Write-Host "First-logon Startup trigger remains in place as a retry mechanism until the staged script succeeds."
-            Write-Host "Log file: $logPath"
+            $process = Start-Process -FilePath "powershell.exe" -ArgumentList $args -Wait -NoNewWindow -PassThru
+            Write-Host "Immediate user/profile cleanup exited with code $($process.ExitCode)."
         }
         catch {
-            Write-Warning "Could not start first-logon provisioning as an alternate user-context task: $($_.Exception.Message)"
-            Write-Host "Reboot or sign out/sign back in as $Username to run: $firstLogonCmd"
+            Write-Warning "Could not run immediate user/profile cleanup: $($_.Exception.Message)"
+        }
+
+        if (Test-AppInstalledByDisplayName -DisplayNamePattern "^Spotify") {
+            Remove-Item -Path $firstLogonCmd -Force -ErrorAction SilentlyContinue
+            Write-Host "Spotify is already installed. Removed Spotify Startup trigger."
+        }
+        else {
+            Write-Host "Spotify is not installed. Startup trigger remains for the next normal non-elevated logon: $firstLogonCmd"
         }
     }
     else {
-        Write-Host "Current user '$currentUser' is not target user '$Username'. First-logon provisioning will run when $Username logs in."
+        Write-Host "Current user '$currentUser' is not target user '$Username'. User/profile cleanup and Spotify install will run when $Username logs in."
     }
 }
-
 
 function Configure-ScreenSaverAndPower {
     Write-Step "Configuring screensaver and power settings"
