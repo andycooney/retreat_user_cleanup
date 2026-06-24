@@ -1,8 +1,8 @@
-# Prepare-LocalAdminMachine-v22.ps1
+# Prepare-LocalAdminMachine-v26.ps1
 
 PowerShell provisioning script for preparing a Windows computer for a local `retreat`-style administrator/autologon user profile.
 
-This script is designed for kiosk, presentation, event, retreat, or shared-use machines where the goal is to create a clean local admin experience with minimal startup noise, controlled power settings, required media/presentation apps, and a simplified desktop/taskbar.
+This script is designed for kiosk, presentation, event, retreat, or shared-use machines where the goal is to create a clean local admin experience with minimal startup noise, controlled power settings, required media/presentation apps, a simplified desktop/taskbar, and a generated desktop wallpaper showing machine details.
 
 > **Important:** Run from an elevated PowerShell session. Autologon stores the configured password in the Windows registry in a recoverable form. Use this only on trusted machines where that tradeoff is acceptable.
 
@@ -11,7 +11,13 @@ This script is designed for kiosk, presentation, event, retreat, or shared-use m
 ## Current version
 
 ```text
-Prepare-LocalAdminMachine-v22.ps1
+Prepare-LocalAdminMachine-v26.ps1
+```
+
+Matching README:
+
+```text
+README-Prepare-LocalAdminMachine-v26.md
 ```
 
 ---
@@ -22,9 +28,21 @@ Prepare-LocalAdminMachine-v22.ps1
 Set-ExecutionPolicy Bypass -Scope Process -Force
 
 powershell.exe -NoProfile -ExecutionPolicy Bypass `
-  -File "$env:USERPROFILE\Downloads\Prepare-LocalAdminMachine-v22.ps1" `
+  -File "$env:USERPROFILE\Downloads\Prepare-LocalAdminMachine-v26.ps1" `
   -LocalAdminUser "retreat" `
   -LocalAdminPassword "YourPasswordHere"
+```
+
+With a computer rename:
+
+```powershell
+Set-ExecutionPolicy Bypass -Scope Process -Force
+
+powershell.exe -NoProfile -ExecutionPolicy Bypass `
+  -File "$env:USERPROFILE\Downloads\Prepare-LocalAdminMachine-v26.ps1" `
+  -LocalAdminUser "retreat" `
+  -LocalAdminPassword "YourPasswordHere" `
+  -NewComputerName "RETREAT-001"
 ```
 
 Optional domain-unjoin credential:
@@ -33,7 +51,7 @@ Optional domain-unjoin credential:
 $cred = Get-Credential
 
 powershell.exe -NoProfile -ExecutionPolicy Bypass `
-  -File "$env:USERPROFILE\Downloads\Prepare-LocalAdminMachine-v22.ps1" `
+  -File "$env:USERPROFILE\Downloads\Prepare-LocalAdminMachine-v26.ps1" `
   -LocalAdminUser "retreat" `
   -LocalAdminPassword "YourPasswordHere" `
   -DomainUnjoinCredential $cred
@@ -54,39 +72,42 @@ Optional workgroup name:
 | `-LocalAdminUser` | Local administrator account to create/update and configure for autologon. | `localadmin` |
 | `-LocalAdminPassword` | Password for the local administrator account and autologon. | `ChangeMe-Use-A-Strong-Password!` |
 | `-WorkgroupName` | Workgroup to move the computer to if it is domain joined. | `WORKGROUP` |
+| `-NewComputerName` | Optional new Windows computer name. If supplied and different, the script requests a rename. | empty |
+| `-SkipPasswordResetIfRunningAsTargetUser` | If running as the target user, skip resetting that active user's password but still use the supplied password for autologon. | `$true` |
 | `-DomainUnjoinCredential` | Optional credential used when removing the computer from a domain. | none |
 
 ---
 
 ## High-level design
 
-The script has two phases:
+The script has two main areas of responsibility:
 
-1. **Bootstrap/system phase**  
+1. **Bootstrap/system phase**
    Runs elevated and handles machine-level configuration.
 
-2. **User/profile provisioning phase**  
-   A second script is staged under `C:\ProgramData\DeltaProvisioning`. In v22, if the bootstrap script is already running as the target user, the script runs the user/profile cleanup immediately from the elevated session. This includes desktop cleanup, taskbar layout, Chrome/Slido checks, Teams cleanup, and per-user UI cleanup.
+2. **User/profile provisioning phase**
+   A helper script is staged under `C:\ProgramData\DeltaProvisioning`. If the bootstrap script is already running as the target user, the script runs the user/profile cleanup immediately from the elevated session. This includes taskbar layout, desktop shortcut cleanup/rebuild, Chrome/Slido checks, Teams cleanup, per-user UI cleanup, and generated wallpaper setup.
 
-Spotify is handled differently because the Spotify installer often does not behave correctly from an elevated Administrator context. Spotify is the only item staged to run later from the target user's normal non-elevated Startup context. If Spotify is already installed, the Startup trigger is removed. If Spotify is not installed, the Startup trigger remains and retries at the next normal sign-in. If the bootstrap is not being run as the target user, the staged script runs when the target user next signs in.
-
-The least-privilege scheduled task approach used in v20/v21 was removed in v22.
+Spotify is handled differently because the Spotify installer often does not behave correctly from an elevated Administrator context. Spotify is staged to run later from the target user's normal non-elevated Startup context. If Spotify is already installed, the Startup trigger is removed. If Spotify is not installed, the Startup trigger remains and retries at the next normal sign-in.
 
 ---
 
-## Files created
+## Files and folders created
 
 The script may create the following files and folders:
 
 ```text
 C:\retreat
+C:\Temp\first-logon-<username>.log
+C:\Temp\retreat-computer-name.txt
+C:\Temp\retreat-system-info-wallpaper.jpg
+C:\Temp\RobotoFontInstall\
 C:\ProgramData\DeltaProvisioning\FirstLogon-For-<username>.ps1
-C:\ProgramData\DeltaProvisioning\first-logon-<username>.log
 C:\ProgramData\DeltaProvisioning\TaskbarLayout-<username>.xml
 C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Startup\Run-FirstLogon-Provisioning-For-<username>.cmd
 ```
 
-The Startup trigger is now primarily for the Spotify user-context install/retry path. It is removed when Spotify is already installed or after Spotify installs successfully from a normal non-elevated target-user logon. v22 no longer creates or relies on a least-privilege scheduled task.
+The Startup trigger is primarily for the Spotify user-context install/retry path. It is removed when Spotify is already installed or after Spotify installs successfully from a normal non-elevated target-user logon.
 
 ---
 
@@ -99,6 +120,19 @@ The Startup trigger is now primarily for the Spotify user-context install/retry 
 - Adds the account to the local `Administrators` group.
 - Sets or resets the password unless the script is currently running as that same user.
 - If already running as the target user, it assumes the supplied password is already correct and uses it for autologon.
+
+### Computer rename
+
+- Accepts `-NewComputerName`.
+- If the requested name is different from the current name, calls Windows rename functionality.
+- Writes the requested computer name to:
+
+```text
+C:\Temp\retreat-computer-name.txt
+```
+
+- A reboot is required before the rename is fully applied.
+- The generated wallpaper uses the intended new name when available, so the wallpaper can show the desired name before reboot.
 
 ### Autologon
 
@@ -118,102 +152,104 @@ It also clears values that may interfere with autologon:
 
 It also clears logon banner text and disables Ctrl+Alt+Del requirement where local policy allows.
 
-### Domain membership
+### Domain/workgroup handling
 
-- Checks whether the computer is domain joined.
-- If domain joined, attempts to remove it from the domain and move it to the configured workgroup.
-- A reboot is required after domain removal.
+- Checks whether the machine is domain joined.
+- If domain joined, attempts to remove the computer from the domain and place it in the configured workgroup.
+- Uses `-DomainUnjoinCredential` if supplied.
+- Requires a reboot after successful domain unjoin.
 
-### Startup cleanup
+### Startup item cleanup
 
-Disables/removes common startup entries from:
+- Removes common Run-key startup items from HKLM and HKCU.
+- Disables Teams and OneDrive startup tasks.
+- Removes common Startup folder entries where accessible.
+- Applies OneDrive/Teams-related startup suppression policies where applicable.
 
-- `HKLM\Software\Microsoft\Windows\CurrentVersion\Run`
-- `HKLM\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Run`
-- `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`
-- Common Startup folder
-- OneDrive/Teams/Microsoft Edge update-related scheduled tasks where found
+### Application removal
 
-### Required folder
-
-Creates:
-
-```text
-C:\retreat
-```
-
-### Machine-level active content policies
-
-Applies machine-level policy/registry settings to reduce or disable:
-
-- Widgets
-- News and Interests
-- Search Highlights
-- Windows Spotlight suggestions
-- Consumer suggestions
-- Tailored experiences
-- Advertising ID
-- Copilot taskbar exposure where supported
-- Windows Hello/PIN/biometric provisioning prompts where supported
-- Phone Link / mobile-device companion integrations where supported
-
-### Security/VPN app removal attempts
-
-Attempts to stop, disable, uninstall, or remove remnants of:
+Attempts to remove or disable remnants of:
 
 - Cisco AnyConnect
 - Cisco Secure Client
 - Duo Authentication for Windows Logon
 - ThreatLocker
 
-For ThreatLocker specifically, the script attempts to:
+ThreatLocker handling is intentionally non-blocking. The script requests service disable/stop/delete and moves on instead of waiting indefinitely if the service is stuck or partially removed.
 
-- Stop ThreatLocker processes.
-- Disable ThreatLocker services.
-- Request service stop/delete using `sc.exe` without waiting indefinitely.
-- Delete ThreatLocker services using `sc delete`.
-- Rename ThreatLocker folders to `.disabled`.
-- Remove ThreatLocker registry keys where accessible.
-
-Version 22 intentionally avoids blocking `Stop-Service` waits because partly removed ThreatLocker service entries can remain in a stuck stopping/deleted state.
-
-> **Limit:** If ThreatLocker tamper protection is active, full removal may require the ThreatLocker portal or vendor-approved uninstall method.
-
-For Duo, the script attempts uninstall via registry uninstall entries and checks for Duo credential provider DLLs.
-
-> **Limit:** Duo Windows Logon may require Safe Mode or vendor recovery steps if credential provider removal is blocked.
+> ThreatLocker may have tamper protection. Full removal may require disabling protection from the ThreatLocker portal or using the vendor-approved uninstall method.
 
 ### Windows Media Player Legacy
 
-Ensures Windows Media Player Legacy is installed/enabled using Windows optional feature/capability handling.
+- Ensures the Windows Media Player Legacy optional feature/capability is enabled where available.
+- Handles both optional feature and optional capability paths.
+- Notes that Windows N editions may require Media Feature Pack support.
 
-### Power and screensaver settings
+### Roboto font family
 
-Configures power behavior:
+- Verifies that the Roboto family is complete before skipping installation.
+- Treats Roboto as complete when either:
+  - Google variable-font files for regular and italic Roboto are present, or
+  - the core static Roboto weights are present, including Regular, Bold, Italic, BoldItalic, Light, Medium, and Black.
+- If only a partial Roboto install is detected, for example only `Roboto Regular`, the script downloads and reinstalls the full Google Fonts Roboto package.
+- Downloads the Roboto font family from Google Fonts.
+- Extracts all matching `.ttf` / `.otf` files beginning with `Roboto`.
+- Copies the Roboto fonts into:
 
-- Plugged in / AC:
-  - Display timeout: never
-  - Sleep timeout: never
-  - Hibernate timeout: never
+```text
+C:\Windows\Fonts
+```
 
-- Battery / DC:
-  - Display timeout: 240 minutes
-  - Sleep timeout: 240 minutes
-  - Hibernate timeout: 240 minutes
+- Registers the fonts under:
 
-Also disables hibernation and screensaver where policy allows.
+```text
+HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts
+```
+
+- Broadcasts a font-change notification so Windows can pick up the new fonts.
+- If Roboto installation fails, wallpaper generation falls back to an available system font.
+
+### Machine-level active content policies
+
+Applies policy-level cleanup for items such as:
+
+- Widgets
+- News and Interests
+- Search Highlights
+- Windows Spotlight
+- Consumer suggestions
+- Windows tips and welcome experiences
+- Tailored experiences
+- Advertising ID
+- Copilot taskbar button/policy where supported
+- Phone Link / mobile device integration where supported
+- Windows Hello / PIN / biometric provisioning prompts where policy allows
+
+### Power and screensaver
+
+- Disables screensaver where accessible.
+- AC/plugged in:
+  - monitor timeout: never
+  - sleep timeout: never
+  - hibernate timeout: never
+- DC/unplugged:
+  - monitor timeout: 240 minutes
+  - sleep timeout: 240 minutes
+  - hibernate timeout: 240 minutes
+- Disables hibernation with `powercfg /hibernate off`.
+
+Group Policy can override some power settings. If Group Policy controls a setting, PowerShell may report that an override exists.
 
 ---
 
-## What the first-logon/user phase does
+## What the user/profile provisioning phase does
 
-In v22, if the bootstrap is running as the target user, the user/profile cleanup runs immediately from the main elevated script. Spotify is skipped in the elevated context and left for a normal non-elevated Startup run. If the bootstrap is not running as the target user, the staged script runs at the next target-user sign-in.
+When run for the target user, the staged user/profile script handles:
 
-### Desktop cleanup
+### Desktop cleanup and shortcuts
 
-- Removes existing desktop items from the current user desktop.
-- Removes existing desktop items from the Public Desktop.
-- Creates a clean set of shortcuts:
+- Removes existing desktop icons/items from the current user's desktop and the Public Desktop.
+- Creates clean desktop shortcuts for:
   - File Explorer, opening `C:\retreat`
   - PowerPoint
   - Windows Media Player Legacy
@@ -221,235 +257,240 @@ In v22, if the bootstrap is running as the target user, the user/profile cleanup
 
 ### Taskbar layout
 
-Attempts to configure the taskbar to include only:
+Applies a taskbar layout intended to show:
 
-- File Explorer, opening `C:\retreat`
-- PowerPoint
-- Windows Media Player Legacy
-- Google Chrome
+```text
+File Explorer -> opens C:\retreat
+PowerPoint
+Windows Media Player Legacy
+Google Chrome
+```
 
-The script uses a taskbar layout XML with `PinListPlacement="Replace"` and also stages canonical `.lnk` files for the pinned apps.
+The script:
 
-> **Limit:** On some Windows 10/11 builds, Microsoft restricts programmatic taskbar pinning for existing users. The script uses the strongest built-in/best-effort method, but a sign out/sign in or reboot may be required before the layout applies. Some builds may still require manual pinning.
+- Clears existing pinned taskbar items where possible.
+- Creates canonical shortcuts with clean hover text.
+- Removes duplicate shortcut names such as `PowerPoint (2).lnk`.
+- Writes a taskbar layout XML to:
 
-### File Explorer shortcut behavior
+```text
+C:\ProgramData\DeltaProvisioning\TaskbarLayout-<username>.xml
+```
 
-The File Explorer taskbar and desktop shortcuts target:
+- Uses a taskbar layout policy with `PinListPlacement="Replace"`.
+- Restarts Explorer.
+
+Some Windows 10/11 builds do not apply taskbar layout changes until sign out/sign in or reboot.
+
+### File Explorer behavior
+
+- Creates the File Explorer taskbar and desktop shortcut so it opens:
 
 ```text
 C:\retreat
 ```
 
-The script also sets Explorer's built-in `LaunchTo` preference where supported, but Windows does not natively support setting all new Explorer windows to an arbitrary custom folder. The custom shortcut is the reliable behavior.
+Windows does not natively support setting every new Explorer window to an arbitrary folder such as `C:\retreat`, so the shortcut target is the reliable behavior.
 
 ### Chrome
 
 - Ensures Google Chrome is installed where possible.
-- Adds Google Chrome to the taskbar and desktop shortcut set.
-- Stages Chrome as the default browser for new profiles using default app associations.
-- Applies best-effort Chrome default-browser nudges for the current user.
+- Adds Chrome to desktop shortcuts and the intended taskbar layout.
+- Attempts to stage Chrome as the default browser for new profiles.
 
-> **Limit:** Windows protects default-browser choices for existing users using per-user hashes. For existing profiles, Chrome may still need to be selected once under Settings > Apps > Default apps > Google Chrome.
-
-### Spotify
-
-- Checks whether Spotify is already installed.
-- If Spotify is already installed, the Spotify Startup trigger is removed.
-- If Spotify is not installed, it is staged for install from the target user's normal non-elevated Startup context.
-
-Spotify is intentionally **not** installed from the elevated bootstrap process in v22. It remains the only user-context install that is kicked out to a later normal user logon, because the Spotify installer often does not behave correctly from an elevated Administrator session. If Spotify is still not detected afterward, the Startup trigger remains so it retries at the next normal logon.
+> Existing Windows user profiles have protected default-browser hash values. Chrome may still need to be manually selected once under Settings > Apps > Default apps > Google Chrome.
 
 ### Slido for PowerPoint
 
-- Checks uninstall registry entries for Slido.
-- Skips installation if Slido is already found.
-- If not found, attempts installation using `winget`.
+- Checks uninstall registry entries for existing Slido installs.
+- If Slido is already detected, skips reinstalling.
+- If missing, attempts installation via `winget`.
+- Avoids repeatedly installing Slido when an MSI/EXE has already registered the app.
 
-This avoids re-downloading or hanging on a Slido install when Slido is already present.
+### Spotify
+
+Spotify is special-cased:
+
+- It is not installed from the elevated Administrator process.
+- A Startup trigger runs Spotify installation from the target user's normal, non-elevated logon context.
+- If Spotify installs successfully, the Startup trigger removes itself.
+- If Spotify is already installed, the trigger is removed.
 
 ### Teams cleanup
 
-- Kills running Teams processes.
-- Removes Teams startup entries from current-user Run/RunOnce/StartupApproved locations.
+- Stops running Teams processes.
+- Removes Teams startup entries from HKCU Run/RunOnce and StartupApproved locations where possible.
 - Removes Teams startup shortcuts.
-- Disables Teams scheduled tasks where found.
-- Updates Teams configuration files where found to suppress open-at-login behavior.
+- Updates Teams config to suppress auto-start where possible.
+- Runs Teams cleanup before and after app/user cleanup to catch early-starting Teams instances.
 
-### Active content and Start cleanup
+### Per-user active content cleanup
 
-Applies per-user cleanup for:
+Attempts to disable or hide:
 
 - Taskbar search box
 - Widgets
 - News and Interests
 - Task View button
-- Chat/Teams personal taskbar button
+- Chat / Teams personal button
 - Copilot taskbar button where supported
-- Windows Spotlight desktop/lock screen content
-- “Learn about this picture” style Spotlight desktop content
-- Tips/suggestions/welcome experience
-- Start recommendations/account notifications
-- Phone Link / “Show mobile device in Start” companion setting
+- Search Highlights
+- Windows Spotlight desktop background
+- `Learn about this picture`
+- Start recommendations
+- Account notifications
+- Phone Link mobile device companion / "Show mobile device in Start"
+- Tips, suggestions, and consumer content
+- Windows Hello / finish setting up your device prompts where policy allows
 
-### Windows Hello and setup prompts
+### System-information wallpaper
 
-Attempts to suppress:
-
-- Windows Hello provisioning prompts
-- PIN setup prompts
-- Biometric prompts where policy allows
-- “Finish setting up your device” style prompts
-
----
-
-## Winget packages used
-
-Where installation is needed and `winget` is available, the script uses package IDs such as:
+Generates a static desktop wallpaper at:
 
 ```text
-Google.Chrome
-Spotify.Spotify
-Slido.Slido
+C:\Temp\retreat-system-info-wallpaper.jpg
 ```
 
-The script checks for installed applications before installing when possible.
+The wallpaper includes:
+
+- Computer name
+- Serial number
+- Asset tag
+- Manufacturer and model
+- IP address
+- Logged-in user
+- OS version
+- Generated timestamp
+
+The wallpaper uses Roboto when installed. If Roboto is unavailable, the script falls back to an available system font.
 
 ---
 
 ## Logs
 
-First-logon actions are logged to:
+The primary user-context log is written to:
 
 ```text
-C:\ProgramData\DeltaProvisioning\first-logon-<username>.log
+C:\Temp\first-logon-<username>.log
 ```
 
-Review this log if taskbar, desktop, Chrome, Spotify, Slido, Teams, or user-interface cleanup does not apply as expected. In v22, Task Scheduler is no longer used for the first-logon/user-context handoff. Check the Startup trigger instead:
+For the standard `retreat` user:
 
 ```text
-C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Startup\Run-FirstLogon-Provisioning-For-<username>.cmd
+C:\Temp\first-logon-retreat.log
+```
+
+The script may also write supporting provisioning files under:
+
+```text
+C:\ProgramData\DeltaProvisioning
 ```
 
 ---
 
-## Recommended run sequence
+## Expected reboot/sign-in behavior
 
-1. Download the script to the machine.
-2. Open PowerShell as Administrator.
-3. Run the script with the target username and password.
-4. Reboot.
-5. Confirm the machine autologs into the target user.
-6. Confirm the user/profile cleanup runs immediately if you ran the script while logged in as `retreat`.
-7. Confirm Spotify installs at the next normal non-elevated `retreat` logon if it was not already installed.
-8. Confirm the desktop/taskbar layout after sign out/sign in or reboot.
+A reboot is recommended after the script completes.
 
-Example:
+A reboot is required for:
 
-```powershell
-Set-ExecutionPolicy Bypass -Scope Process -Force
+- Computer rename
+- Domain unjoin
+- Some autologon changes
+- Some taskbar layout policy changes
+- Some Windows Spotlight / Start / Explorer UI changes
 
-powershell.exe -NoProfile -ExecutionPolicy Bypass `
-  -File "$env:USERPROFILE\Downloads\Prepare-LocalAdminMachine-v22.ps1" `
-  -LocalAdminUser "retreat" `
-  -LocalAdminPassword "YourPasswordHere"
-
-Restart-Computer -Force
-```
-
----
-
-## Running from a GitHub raw URL
-
-Recommended method: download first, then run from disk.
-
-```powershell
-mkdir C:\Temp -Force
-
-Invoke-WebRequest `
-  -Uri "https://raw.githubusercontent.com/<owner>/<repo>/<tag-or-branch>/Prepare-LocalAdminMachine-v22.ps1" `
-  -OutFile "C:\Temp\Prepare-LocalAdminMachine-v22.ps1"
-
-Set-ExecutionPolicy Bypass -Scope Process -Force
-
-powershell.exe -NoProfile -ExecutionPolicy Bypass `
-  -File "C:\Temp\Prepare-LocalAdminMachine-v22.ps1" `
-  -LocalAdminUser "retreat" `
-  -LocalAdminPassword "YourPasswordHere"
-```
-
-For a persistent URL, prefer a release tag instead of `main`:
-
-```text
-https://raw.githubusercontent.com/<owner>/<repo>/v22/Prepare-LocalAdminMachine-v22.ps1
-```
+After reboot, the machine should autologon as the configured local user if the password and Winlogon settings are correct and no security policy blocks autologon.
 
 ---
 
 ## Known limitations
 
-### Autologon security
-
-Autologon stores the configured password in the registry in a recoverable form. This is a Windows design limitation of classic AutoAdminLogon.
-
-### Existing default browser
-
-Windows may block scripted changes to the default browser for an existing user profile. The script stages and nudges Chrome defaults, but manual confirmation may still be required.
-
-### Taskbar pinning
-
-Modern Windows builds restrict direct taskbar pinning. The script uses taskbar layout XML and shortcut staging, but some systems may require sign out/sign in, reboot, or manual correction.
-
-### ThreatLocker
-
-ThreatLocker may have tamper protection. Full removal may require portal authorization or vendor-approved removal tooling. v22 avoids waiting indefinitely on stuck services, but local cleanup still cannot bypass tamper protection.
-
-### Duo Windows Logon
-
-Duo credential provider removal may require Safe Mode or vendor recovery guidance if blocked.
-
-### Group Policy overrides
-
-Domain or local policies can override power settings, Windows Hello settings, taskbar behavior, widgets, Spotlight, and other UI settings.
+- Autologon stores the password in the registry in a recoverable form.
+- ThreatLocker may require portal/vendor authorization for full removal.
+- Some Windows taskbar pinning behavior is intentionally restricted by Microsoft and may require sign out/sign in or reboot.
+- Existing-user default browser changes may not fully apply because Windows protects per-user default-browser hash values.
+- Windows does not provide a native supported setting to make every Explorer window open to an arbitrary custom folder; the script handles this through the pinned/desktop shortcut target.
+- Group Policy can override power, Start, taskbar, Windows Hello, or active-content settings.
+- Roboto installation requires network access to Google Fonts unless the fonts are already installed.
 
 ---
 
-## Post-run verification checklist
+## Quick post-run checks
 
-After reboot/sign-in, verify:
+### Confirm local admin account
 
-- The target user autologs in.
-- `C:\retreat` exists.
-- Desktop has only:
-  - File Explorer
-  - PowerPoint
-  - Windows Media Player Legacy
-  - Google Chrome
-- File Explorer shortcut opens `C:\retreat`.
-- Taskbar contains the intended app set.
-- Teams does not start automatically.
-- OneDrive does not start automatically.
-- Spotify is installed, or the Startup trigger remains staged to install it at the next normal non-elevated logon.
-- Slido for PowerPoint is installed.
-- Windows Media Player Legacy is installed.
-- Screen stays on when plugged in.
-- Screen/sleep timeout is 4 hours on battery.
-- Widgets, search highlights, Spotlight active content, and mobile device Start companion are disabled.
-- Windows Hello/PIN setup prompts no longer appear, where policy allows.
-
----
-
-## Maintenance notes
-
-- Increment the script filename each time it is changed, for example:
-
-```text
-Prepare-LocalAdminMachine-v22.ps1
-Prepare-LocalAdminMachine-v23.ps1
+```powershell
+Get-LocalUser retreat
+Get-LocalGroupMember Administrators | Where-Object Name -match "retreat"
 ```
 
-- Keep the README version aligned with the script version.
-- Review the first-logon log after changes:
+### Confirm autologon keys without displaying the password
+
+```powershell
+Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" |
+  Select-Object AutoAdminLogon, ForceAutoLogon, DefaultUserName, DefaultDomainName
+```
+
+### Confirm computer rename target
+
+```powershell
+hostname
+Get-Content C:\Temp\retreat-computer-name.txt -ErrorAction SilentlyContinue
+```
+
+### Confirm serial number and asset tag
+
+```powershell
+[PSCustomObject]@{
+    ComputerName = $env:COMPUTERNAME
+    Manufacturer = (Get-CimInstance Win32_ComputerSystem).Manufacturer
+    Model        = (Get-CimInstance Win32_ComputerSystem).Model
+    SerialNumber = (Get-CimInstance Win32_BIOS).SerialNumber
+    AssetTag     = (Get-CimInstance Win32_SystemEnclosure).SMBIOSAssetTag
+}
+```
+
+### Confirm wallpaper file
+
+```powershell
+Test-Path C:\Temp\retreat-system-info-wallpaper.jpg
+```
+
+### Confirm Roboto fonts
+
+```powershell
+Get-ChildItem C:\Windows\Fonts\Roboto* -ErrorAction SilentlyContinue |
+    Select-Object Name, Length
+```
+
+v26 does not skip Roboto installation merely because the `Roboto` family name exists. It checks for a complete variable-font pair or the core static weights before considering the family complete.
+
+### Check first-logon/user-context log
+
+```powershell
+Get-Content C:\Temp\first-logon-retreat.log -Tail 100
+```
+
+### Confirm installed apps
+
+```powershell
+Get-ItemProperty `
+  "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*", `
+  "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*", `
+  "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*" `
+  -ErrorAction SilentlyContinue |
+Where-Object { $_.DisplayName -match "Spotify|Slido|Chrome" } |
+Select-Object DisplayName, DisplayVersion, Publisher
+```
+
+---
+
+## Repository versioning note
+
+When this script is iterated, keep the script and README versions in sync. For example:
 
 ```text
-C:\ProgramData\DeltaProvisioning\first-logon-<username>.log
+Prepare-LocalAdminMachine-v26.ps1
+README-Prepare-LocalAdminMachine-v26.md
 ```

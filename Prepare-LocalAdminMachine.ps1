@@ -1,4 +1,4 @@
-# Script version: 2026-06-23-v19-defer-spotify-to-normal-logon
+# Script version: 2026-06-24-v26-verify-full-roboto-family
 #requires -RunAsAdministrator
 <#
 Purpose:
@@ -12,6 +12,9 @@ Purpose:
 - Disable screensaver
 - Apply machine policies for active content now; stage per-user taskbar/Spotlight/default-browser/taskbar-pin cleanup for first target-user logon; keep File Explorer pinned and pin PowerPoint, Windows Media Player Legacy, and Google Chrome
 - Create C:\retreat
+- Optionally rename the computer with -NewComputerName
+- Install the full Roboto font family from Google Fonts
+- Generate a static system-information wallpaper using Roboto
 - Set AC power: screen stays on, no sleep/hibernate
 - Set DC battery power: screen/sleep/hibernate after 4 hours
 
@@ -31,6 +34,7 @@ param(
     [string]$LocalAdminUser = "localadmin",
     [string]$LocalAdminPassword = "ChangeMe-Use-A-Strong-Password!",
     [string]$WorkgroupName = "WORKGROUP",
+    [string]$NewComputerName = "",
 
     # If $true and the script is running as -LocalAdminUser, the script will not reset
     # that user's password during the active session. It will still configure autologon
@@ -111,7 +115,8 @@ function Ensure-LocalAdmin {
 function Configure-AutoLogon {
     param(
         [string]$Username,
-        [string]$Password
+        [string]$Password,
+        [string]$DefaultDomainName = $env:COMPUTERNAME
     )
 
     Write-Step "Configuring Windows autologon"
@@ -122,7 +127,7 @@ function Configure-AutoLogon {
     Set-ItemProperty -Path $winlogonPath -Name "AutoAdminLogon" -Value "1" -Type String
     Set-ItemProperty -Path $winlogonPath -Name "DefaultUserName" -Value $Username -Type String
     Set-ItemProperty -Path $winlogonPath -Name "DefaultPassword" -Value $Password -Type String
-    Set-ItemProperty -Path $winlogonPath -Name "DefaultDomainName" -Value $env:COMPUTERNAME -Type String
+    Set-ItemProperty -Path $winlogonPath -Name "DefaultDomainName" -Value $DefaultDomainName -Type String
     Set-ItemProperty -Path $winlogonPath -Name "ForceAutoLogon" -Value "1" -Type String
 
     Remove-ItemProperty -Path $winlogonPath -Name "AutoLogonCount" -ErrorAction SilentlyContinue
@@ -141,6 +146,41 @@ function Configure-AutoLogon {
     }
 
     Write-Warning "Autologon stores the password in the registry in a recoverable form. Use only on trusted/kiosk-style machines."
+}
+
+
+function Rename-ComputerIfRequested {
+    param([string]$RequestedName)
+
+    if ([string]::IsNullOrWhiteSpace($RequestedName)) {
+        return $env:COMPUTERNAME
+    }
+
+    Write-Step "Checking requested computer rename"
+
+    $cleanName = $RequestedName.Trim()
+    if ($cleanName.Length -gt 15) {
+        throw "Computer name '$cleanName' is too long. Windows computer names should be 15 characters or fewer."
+    }
+
+    if ($cleanName -notmatch '^[A-Za-z0-9][A-Za-z0-9-]{0,14}$' -or $cleanName.EndsWith('-')) {
+        throw "Computer name '$cleanName' is invalid. Use letters, numbers, and hyphens; do not end with a hyphen."
+    }
+
+    if ($env:COMPUTERNAME -ieq $cleanName) {
+        Write-Host "Computer name is already $cleanName."
+        return $env:COMPUTERNAME
+    }
+
+    try {
+        Rename-Computer -NewName $cleanName -Force -ErrorAction Stop
+        Write-Warning "Computer rename requested: $env:COMPUTERNAME -> $cleanName. A reboot is required before the new name is active."
+        return $cleanName
+    }
+    catch {
+        Write-Warning "Could not rename computer to ${cleanName}: $($_.Exception.Message)"
+        return $env:COMPUTERNAME
+    }
 }
 
 function Remove-FromDomainIfJoined {
@@ -822,6 +862,138 @@ function Ensure-RetreatFolder {
     Write-Host "Ensured folder exists: C:\retreat"
 }
 
+function Test-RobotoFontFamilyComplete {
+    $fontFolder = Join-Path $env:WINDIR "Fonts"
+    $robotoFiles = Get-ChildItem -Path $fontFolder -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -like "Roboto*.ttf" -or $_.Name -like "Roboto*.otf" }
+
+    if (-not $robotoFiles) {
+        return $false
+    }
+
+    $fileNames = $robotoFiles.Name
+
+    # Newer Google Fonts downloads may include variable font files instead of one file per weight.
+    $hasVariableRegular = $fileNames | Where-Object { $_ -like "Roboto*VariableFont*.ttf" -and $_ -notlike "*Italic*" }
+    $hasVariableItalic = $fileNames | Where-Object { $_ -like "Roboto*Italic*VariableFont*.ttf" }
+    if ($hasVariableRegular -and $hasVariableItalic) {
+        return $true
+    }
+
+    # Static font-family check. If only Roboto Regular exists, do not treat the family as complete.
+    $requiredPatterns = @(
+        "Roboto-Regular.*",
+        "Roboto-Bold.*",
+        "Roboto-Italic.*",
+        "Roboto-BoldItalic.*",
+        "Roboto-Light.*",
+        "Roboto-Medium.*",
+        "Roboto-Black.*"
+    )
+
+    foreach ($pattern in $requiredPatterns) {
+        if (-not ($fileNames | Where-Object { $_ -like $pattern })) {
+            return $false
+        }
+    }
+
+    return $true
+}
+
+function Ensure-RobotoFontFamily {
+    Write-Step "Ensuring full Roboto font family is installed"
+
+    try {
+        if (Test-RobotoFontFamilyComplete) {
+            $count = @(Get-ChildItem -Path (Join-Path $env:WINDIR "Fonts") -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -like "Roboto*.ttf" -or $_.Name -like "Roboto*.otf" }).Count
+            Write-Host "Roboto font family appears complete. Found $count Roboto font file(s)."
+            return
+        }
+        else {
+            Write-Host "Roboto font family is missing or incomplete. Installing full Google Fonts package."
+        }
+    }
+    catch {
+        Write-Warning "Could not verify Roboto completeness before install: $($_.Exception.Message)"
+    }
+
+    $tempRoot = "C:\Temp\RobotoFontInstall"
+    $zipPath = Join-Path $tempRoot "roboto.zip"
+    $extractPath = Join-Path $tempRoot "extracted"
+    $fontRegistryPath = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts"
+    $fontDownloadUrl = "https://fonts.google.com/download?family=Roboto"
+
+    try {
+        New-Item -Path $tempRoot -ItemType Directory -Force | Out-Null
+        if (Test-Path $extractPath) {
+            Remove-Item -Path $extractPath -Recurse -Force -ErrorAction SilentlyContinue
+        }
+        New-Item -Path $extractPath -ItemType Directory -Force | Out-Null
+
+        Write-Host "Downloading Roboto from Google Fonts."
+        $oldProgressPreference = $ProgressPreference
+        $ProgressPreference = 'SilentlyContinue'
+        try {
+            Invoke-WebRequest -Uri $fontDownloadUrl -OutFile $zipPath -UseBasicParsing -ErrorAction Stop
+        }
+        finally {
+            $ProgressPreference = $oldProgressPreference
+        }
+
+        Expand-Archive -Path $zipPath -DestinationPath $extractPath -Force
+
+        $fontFiles = Get-ChildItem -Path $extractPath -Recurse -Include *.ttf,*.otf -ErrorAction SilentlyContinue |
+            Where-Object { $_.BaseName -like "Roboto*" }
+
+        if (-not $fontFiles) {
+            throw "No Roboto .ttf or .otf files were found in the downloaded archive."
+        }
+
+        New-Item -Path $fontRegistryPath -Force | Out-Null
+
+        foreach ($fontFile in $fontFiles) {
+            $destination = Join-Path $env:WINDIR "Fonts\$($fontFile.Name)"
+            Copy-Item -Path $fontFile.FullName -Destination $destination -Force
+
+            $registryName = "$($fontFile.BaseName) (TrueType)"
+            if ($fontFile.Extension -ieq ".otf") {
+                $registryName = "$($fontFile.BaseName) (OpenType)"
+            }
+
+            New-ItemProperty `
+                -Path $fontRegistryPath `
+                -Name $registryName `
+                -PropertyType String `
+                -Value $fontFile.Name `
+                -Force | Out-Null
+
+            Write-Host "Installed font: $($fontFile.Name)"
+        }
+
+        try {
+            Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+public class FontBroadcastTools {
+    [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
+    public static extern IntPtr SendMessageTimeout(IntPtr hWnd, uint Msg, UIntPtr wParam, string lParam, uint fuFlags, uint uTimeout, out UIntPtr lpdwResult);
+}
+"@ -ErrorAction SilentlyContinue
+            $result = [UIntPtr]::Zero
+            [FontBroadcastTools]::SendMessageTimeout([IntPtr]0xffff, 0x001D, [UIntPtr]::Zero, $null, 0x0002, 5000, [ref]$result) | Out-Null
+        }
+        catch {
+            Write-Warning "Could not broadcast font-change notification: $($_.Exception.Message)"
+        }
+
+        Write-Host "Roboto font family installation completed."
+    }
+    catch {
+        Write-Warning "Could not install Roboto font family: $($_.Exception.Message)"
+        Write-Warning "Wallpaper generation will fall back to an available system font if Roboto is unavailable."
+    }
+}
+
 function Configure-WindowsHelloAndSetupExperienceSuppression {
     Write-Step "Disabling Windows Hello, biometric prompts, PIN provisioning, and setup experience prompts"
 
@@ -890,9 +1062,11 @@ function Stage-FirstLogonProvisioning {
     $startupFolder = Join-Path $env:ProgramData "Microsoft\Windows\Start Menu\Programs\Startup"
     $firstLogonScript = Join-Path $provisioningFolder "FirstLogon-For-$Username.ps1"
     $firstLogonCmd = Join-Path $startupFolder "Run-FirstLogon-Provisioning-For-$Username.cmd"
-    $logPath = Join-Path $provisioningFolder "first-logon-$Username.log"
+    $tempFolder = "C:\Temp"
+    $logPath = Join-Path $tempFolder "first-logon-$Username.log"
 
     New-Item -Path $provisioningFolder -ItemType Directory -Force | Out-Null
+    New-Item -Path $tempFolder -ItemType Directory -Force | Out-Null
     New-Item -Path $startupFolder -ItemType Directory -Force | Out-Null
 
     $firstLogonContent = @'
@@ -908,6 +1082,10 @@ function Write-Log {
     param([string]$Message)
     $line = "[{0}] {1}" -f (Get-Date -Format "yyyy-MM-dd HH:mm:ss"), $Message
     Write-Host $line
+    $logFolder = Split-Path -Path $LogPath -Parent
+    if ($logFolder -and -not (Test-Path $logFolder)) {
+        New-Item -Path $logFolder -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
+    }
     Add-Content -Path $LogPath -Value $line -Encoding UTF8
 }
 
@@ -1777,6 +1955,302 @@ function Reset-TaskbarPinsForProvisionedApps {
     }
 }
 
+
+function Get-PrimaryIPv4AddressForWallpaper {
+    try {
+        $ip = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+            Where-Object {
+                $_.IPAddress -notlike "169.254.*" -and
+                $_.IPAddress -ne "127.0.0.1" -and
+                $_.PrefixOrigin -ne "WellKnown"
+            } |
+            Sort-Object InterfaceMetric, InterfaceIndex |
+            Select-Object -First 1 -ExpandProperty IPAddress
+        if ($ip) { return $ip }
+    }
+    catch { }
+    return "Unavailable"
+}
+
+
+function Test-RobotoFontFamilyCompleteForWallpaper {
+    $fontFolder = Join-Path $env:WINDIR "Fonts"
+    $robotoFiles = Get-ChildItem -Path $fontFolder -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -like "Roboto*.ttf" -or $_.Name -like "Roboto*.otf" }
+
+    if (-not $robotoFiles) { return $false }
+
+    $fileNames = $robotoFiles.Name
+    $hasVariableRegular = $fileNames | Where-Object { $_ -like "Roboto*VariableFont*.ttf" -and $_ -notlike "*Italic*" }
+    $hasVariableItalic = $fileNames | Where-Object { $_ -like "Roboto*Italic*VariableFont*.ttf" }
+    if ($hasVariableRegular -and $hasVariableItalic) { return $true }
+
+    $requiredPatterns = @(
+        "Roboto-Regular.*",
+        "Roboto-Bold.*",
+        "Roboto-Italic.*",
+        "Roboto-BoldItalic.*",
+        "Roboto-Light.*",
+        "Roboto-Medium.*",
+        "Roboto-Black.*"
+    )
+
+    foreach ($pattern in $requiredPatterns) {
+        if (-not ($fileNames | Where-Object { $_ -like $pattern })) { return $false }
+    }
+
+    return $true
+}
+
+function Ensure-RobotoFontFamilyForWallpaper {
+    Write-Log "Ensuring Roboto is installed before wallpaper generation."
+
+    try {
+        if (Test-RobotoFontFamilyCompleteForWallpaper) {
+            $count = @(Get-ChildItem -Path (Join-Path $env:WINDIR "Fonts") -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -like "Roboto*.ttf" -or $_.Name -like "Roboto*.otf" }).Count
+            Write-Log "Roboto font family appears complete. Found $count Roboto font file(s)."
+            return
+        }
+        else {
+            Write-Log "Roboto font family is missing or incomplete. Installing full Google Fonts package."
+        }
+    }
+    catch {
+        Write-Log "Could not verify Roboto completeness before install: $($_.Exception.Message)"
+    }
+
+    if (-not (Test-CurrentProcessIsElevated)) {
+        Write-Log "Current process is not elevated; cannot install Roboto system-wide."
+        return
+    }
+
+    $tempRoot = "C:\Temp\RobotoFontInstall"
+    $zipPath = Join-Path $tempRoot "roboto.zip"
+    $extractPath = Join-Path $tempRoot "extracted"
+    $fontRegistryPath = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts"
+    $fontDownloadUrl = "https://fonts.google.com/download?family=Roboto"
+
+    try {
+        New-Item -Path $tempRoot -ItemType Directory -Force | Out-Null
+        if (Test-Path $extractPath) {
+            Remove-Item -Path $extractPath -Recurse -Force -ErrorAction SilentlyContinue
+        }
+        New-Item -Path $extractPath -ItemType Directory -Force | Out-Null
+
+        $oldProgressPreference = $ProgressPreference
+        $ProgressPreference = 'SilentlyContinue'
+        try {
+            Invoke-WebRequest -Uri $fontDownloadUrl -OutFile $zipPath -UseBasicParsing -ErrorAction Stop
+        }
+        finally {
+            $ProgressPreference = $oldProgressPreference
+        }
+
+        Expand-Archive -Path $zipPath -DestinationPath $extractPath -Force
+        $fontFiles = Get-ChildItem -Path $extractPath -Recurse -Include *.ttf,*.otf -ErrorAction SilentlyContinue |
+            Where-Object { $_.BaseName -like "Roboto*" }
+
+        if (-not $fontFiles) {
+            throw "No Roboto .ttf or .otf files were found in the downloaded archive."
+        }
+
+        New-Item -Path $fontRegistryPath -Force | Out-Null
+
+        foreach ($fontFile in $fontFiles) {
+            $destination = Join-Path $env:WINDIR "Fonts\$($fontFile.Name)"
+            Copy-Item -Path $fontFile.FullName -Destination $destination -Force
+            $registryName = "$($fontFile.BaseName) (TrueType)"
+            if ($fontFile.Extension -ieq ".otf") {
+                $registryName = "$($fontFile.BaseName) (OpenType)"
+            }
+            New-ItemProperty -Path $fontRegistryPath -Name $registryName -PropertyType String -Value $fontFile.Name -Force | Out-Null
+            Write-Log "Installed font: $($fontFile.Name)"
+        }
+
+        try {
+            Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+public class FontBroadcastTools {
+    [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
+    public static extern IntPtr SendMessageTimeout(IntPtr hWnd, uint Msg, UIntPtr wParam, string lParam, uint fuFlags, uint uTimeout, out UIntPtr lpdwResult);
+}
+"@ -ErrorAction SilentlyContinue
+            $result = [UIntPtr]::Zero
+            [FontBroadcastTools]::SendMessageTimeout([IntPtr]0xffff, 0x001D, [UIntPtr]::Zero, $null, 0x0002, 5000, [ref]$result) | Out-Null
+        }
+        catch {
+            Write-Log "Could not broadcast font-change notification: $($_.Exception.Message)"
+        }
+
+        Write-Log "Roboto font family installation completed."
+    }
+    catch {
+        Write-Log "Could not install Roboto font family: $($_.Exception.Message)"
+    }
+}
+
+function Get-PreferredWallpaperFontName {
+    try {
+        Add-Type -AssemblyName System.Drawing -ErrorAction SilentlyContinue
+        $installed = New-Object System.Drawing.Text.InstalledFontCollection
+        $families = $installed.Families | Select-Object -ExpandProperty Name
+        if ($families -contains "Roboto") { return "Roboto" }
+        if ($families -contains "Arial") { return "Arial" }
+    }
+    catch { }
+    return "Microsoft Sans Serif"
+}
+
+
+function Get-ComputerNameForWallpaper {
+    $nameFile = "C:\Temp\retreat-computer-name.txt"
+    try {
+        if (Test-Path $nameFile) {
+            $name = (Get-Content -Path $nameFile -Raw -ErrorAction SilentlyContinue).Trim()
+            if (-not [string]::IsNullOrWhiteSpace($name)) { return $name }
+        }
+    }
+    catch { }
+    return $env:COMPUTERNAME
+}
+
+function New-RetreatInfoWallpaper {
+    Write-Log "Generating system-information wallpaper."
+
+    $wallpaperPath = "C:\Temp\retreat-system-info-wallpaper.jpg"
+    $wallpaperFolder = Split-Path -Path $wallpaperPath -Parent
+    if (-not (Test-Path $wallpaperFolder)) {
+        New-Item -Path $wallpaperFolder -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
+    }
+
+    try {
+        Add-Type -AssemblyName System.Drawing -ErrorAction Stop
+
+        $width = 1920
+        $height = 1080
+        try {
+            $video = Get-CimInstance Win32_VideoController -ErrorAction SilentlyContinue |
+                Where-Object { $_.CurrentHorizontalResolution -and $_.CurrentVerticalResolution } |
+                Select-Object -First 1
+            if ($video) {
+                $width = [int]$video.CurrentHorizontalResolution
+                $height = [int]$video.CurrentVerticalResolution
+            }
+        }
+        catch { }
+
+        if ($width -lt 1024) { $width = 1920 }
+        if ($height -lt 768) { $height = 1080 }
+
+        $computerSystem = Get-CimInstance Win32_ComputerSystem -ErrorAction SilentlyContinue
+        $bios = Get-CimInstance Win32_BIOS -ErrorAction SilentlyContinue
+        $enclosure = Get-CimInstance Win32_SystemEnclosure -ErrorAction SilentlyContinue
+        $os = Get-CimInstance Win32_OperatingSystem -ErrorAction SilentlyContinue
+
+        $serial = if ($bios.SerialNumber) { $bios.SerialNumber.Trim() } else { "Unavailable" }
+        $assetTag = if ($enclosure.SMBIOSAssetTag) { $enclosure.SMBIOSAssetTag.Trim() } else { "Unavailable" }
+        if ([string]::IsNullOrWhiteSpace($assetTag) -or $assetTag -match "(?i)no asset|none|default|string") { $assetTag = "Unavailable" }
+        $manufacturer = if ($computerSystem.Manufacturer) { $computerSystem.Manufacturer.Trim() } else { "Unavailable" }
+        $model = if ($computerSystem.Model) { $computerSystem.Model.Trim() } else { "Unavailable" }
+        $osCaption = if ($os.Caption) { $os.Caption.Trim() } else { "Unavailable" }
+        $ip = Get-PrimaryIPv4AddressForWallpaper
+        $fontName = Get-PreferredWallpaperFontName
+
+        $bitmap = New-Object System.Drawing.Bitmap($width, $height)
+        $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+        $graphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+        $graphics.TextRenderingHint = [System.Drawing.Text.TextRenderingHint]::ClearTypeGridFit
+
+        $background = [System.Drawing.Color]::FromArgb(18, 22, 28)
+        $panel = [System.Drawing.Color]::FromArgb(36, 42, 52)
+        $accent = [System.Drawing.Color]::FromArgb(120, 160, 220)
+        $white = [System.Drawing.Color]::FromArgb(245, 247, 250)
+        $muted = [System.Drawing.Color]::FromArgb(190, 198, 210)
+
+        $graphics.Clear($background)
+        $brushPanel = New-Object System.Drawing.SolidBrush($panel)
+        $brushAccent = New-Object System.Drawing.SolidBrush($accent)
+        $brushWhite = New-Object System.Drawing.SolidBrush($white)
+        $brushMuted = New-Object System.Drawing.SolidBrush($muted)
+
+        $margin = [Math]::Max(60, [int]($width * 0.045))
+        $panelWidth = [Math]::Min(820, [int]($width * 0.48))
+        $panelHeight = 520
+        $x = $margin
+        $y = [Math]::Max(70, [int]($height * 0.12))
+
+        $graphics.FillRectangle($brushPanel, $x, $y, $panelWidth, $panelHeight)
+        $graphics.FillRectangle($brushAccent, $x, $y, 8, $panelHeight)
+
+        $titleFont = New-Object System.Drawing.Font($fontName, 32, [System.Drawing.FontStyle]::Bold)
+        $labelFont = New-Object System.Drawing.Font($fontName, 14, [System.Drawing.FontStyle]::Regular)
+        $valueFont = New-Object System.Drawing.Font($fontName, 20, [System.Drawing.FontStyle]::Regular)
+        $smallFont = New-Object System.Drawing.Font($fontName, 11, [System.Drawing.FontStyle]::Regular)
+
+        $cursorY = $y + 38
+        $graphics.DrawString("Retreat Computer", $titleFont, $brushWhite, $x + 36, $cursorY)
+        $cursorY += 70
+
+        $rows = @(
+            @{ Label = "Computer Name"; Value = (Get-ComputerNameForWallpaper) },
+            @{ Label = "Serial Number"; Value = $serial },
+            @{ Label = "Asset Tag"; Value = $assetTag },
+            @{ Label = "Model"; Value = "$manufacturer $model" },
+            @{ Label = "IP Address"; Value = $ip },
+            @{ Label = "Logged-in User"; Value = $env:USERNAME },
+            @{ Label = "Operating System"; Value = $osCaption }
+        )
+
+        foreach ($row in $rows) {
+            $graphics.DrawString($row.Label, $labelFont, $brushMuted, $x + 40, $cursorY)
+            $graphics.DrawString([string]$row.Value, $valueFont, $brushWhite, $x + 40, $cursorY + 22)
+            $cursorY += 62
+        }
+
+        $stamp = "Generated {0}" -f (Get-Date -Format "yyyy-MM-dd HH:mm")
+        $graphics.DrawString($stamp, $smallFont, $brushMuted, $x + 40, $y + $panelHeight - 34)
+
+        $bitmap.Save($wallpaperPath, [System.Drawing.Imaging.ImageFormat]::Jpeg)
+
+        $graphics.Dispose()
+        $bitmap.Dispose()
+        $brushPanel.Dispose()
+        $brushAccent.Dispose()
+        $brushWhite.Dispose()
+        $brushMuted.Dispose()
+        $titleFont.Dispose()
+        $labelFont.Dispose()
+        $valueFont.Dispose()
+        $smallFont.Dispose()
+
+        $desktopPath = "HKCU:\Control Panel\Desktop"
+        $null = Set-RegistryStringValue -Path $desktopPath -Name "Wallpaper" -Value $wallpaperPath
+        $null = Set-RegistryStringValue -Path $desktopPath -Name "WallpaperStyle" -Value "10"
+        $null = Set-RegistryStringValue -Path $desktopPath -Name "TileWallpaper" -Value "0"
+
+        try {
+            Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+public class RetreatWallpaperTools {
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool SystemParametersInfo(int uAction, int uParam, string lpvParam, int fuWinIni);
+}
+"@ -ErrorAction SilentlyContinue
+            [RetreatWallpaperTools]::SystemParametersInfo(20, 0, $wallpaperPath, 3) | Out-Null
+        }
+        catch {
+            Write-Log "Could not immediately apply generated wallpaper: $($_.Exception.Message)"
+        }
+
+        Write-Log "Generated and applied wallpaper: $wallpaperPath"
+    }
+    catch {
+        Write-Log "Could not generate wallpaper: $($_.Exception.Message)"
+    }
+}
+
 function Set-ChromeDefaultBrowserBestEffort {
     Write-Log "Applying Chrome default browser best-effort settings."
 
@@ -1837,6 +2311,8 @@ Reset-DesktopIconsAndCreateProvisionedShortcuts
 Configure-TaskbarLayoutPolicyForProvisionedApps
 Disable-TeamsStartupForCurrentUser
 Configure-CurrentUserTaskbarAndActiveContent
+Ensure-RobotoFontFamilyForWallpaper
+New-RetreatInfoWallpaper
 Disable-TeamsStartupForCurrentUser
 
 try {
@@ -1881,7 +2357,8 @@ function Invoke-StagedFirstLogonIfCurrentUser {
     $startupFolder = Join-Path $env:ProgramData "Microsoft\Windows\Start Menu\Programs\Startup"
     $firstLogonScript = Join-Path $provisioningFolder "FirstLogon-For-$Username.ps1"
     $firstLogonCmd = Join-Path $startupFolder "Run-FirstLogon-Provisioning-For-$Username.cmd"
-    $logPath = Join-Path $provisioningFolder "first-logon-$Username.log"
+    $tempFolder = "C:\Temp"
+    $logPath = Join-Path $tempFolder "first-logon-$Username.log"
 
     if (-not (Test-Path $firstLogonScript)) {
         Write-Warning "Staged user/profile script was not found at $firstLogonScript. It cannot run."
@@ -1961,9 +2438,14 @@ Ensure-LocalAdmin `
     -Password $LocalAdminPassword `
     -SkipResetIfCurrentUser $SkipPasswordResetIfRunningAsTargetUser
 
+$effectiveComputerNameForAutologon = Rename-ComputerIfRequested -RequestedName $NewComputerName
+New-Item -Path "C:\Temp" -ItemType Directory -Force | Out-Null
+Set-Content -Path "C:\Temp\retreat-computer-name.txt" -Value $effectiveComputerNameForAutologon -Encoding ASCII -Force
+
 Configure-AutoLogon `
     -Username $LocalAdminUser `
-    -Password $LocalAdminPassword
+    -Password $LocalAdminPassword `
+    -DefaultDomainName $effectiveComputerNameForAutologon
 
 Remove-FromDomainIfJoined `
     -Workgroup $WorkgroupName `
@@ -1971,6 +2453,7 @@ Remove-FromDomainIfJoined `
 
 Disable-StartupItems -Username $LocalAdminUser
 Ensure-RetreatFolder
+Ensure-RobotoFontFamily
 Configure-WindowsHelloAndSetupExperienceSuppression
 Configure-MachineActiveContentPolicies
 Configure-ChromeDefaultBrowserForNewUsers
