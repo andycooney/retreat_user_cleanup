@@ -1,4 +1,4 @@
-# Script version: 2026-06-24-v33-repair-system-icon-fonts
+# Script version: 2026-06-24-v35-tolerant-machine-policy-registry-writes
 #requires -RunAsAdministrator
 <#
 Purpose:
@@ -655,6 +655,34 @@ function Ensure-WindowsMediaPlayerLegacy {
 }
 
 
+function Convert-RegistryPathForRegExeMain {
+    param([string]$Path)
+    return ($Path -replace '^HKCU:', 'HKCU' -replace '^HKLM:', 'HKLM') -replace '/', '\'
+}
+
+function Ensure-RegistryKeyExistsMain {
+    param([Parameter(Mandatory)][string]$Path)
+
+    if (Test-Path $Path) {
+        return $true
+    }
+
+    try {
+        New-Item -Path $Path -Force -ErrorAction Stop | Out-Null
+        return $true
+    }
+    catch {
+        Write-Warning "Could not create registry key ${Path} with PowerShell. Trying reg.exe fallback. $($_.Exception.Message)"
+        $regPath = Convert-RegistryPathForRegExeMain -Path $Path
+        & reg.exe add $regPath /f | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            return $true
+        }
+        Write-Warning "Could not create registry key ${Path}; skipping values for this key. reg.exe exit code: $LASTEXITCODE"
+        return $false
+    }
+}
+
 function Set-RegistryDWordValue {
     param(
         [Parameter(Mandatory)][string]$Path,
@@ -662,8 +690,24 @@ function Set-RegistryDWordValue {
         [Parameter(Mandatory)][int]$Value
     )
 
-    New-Item -Path $Path -Force | Out-Null
-    New-ItemProperty -Path $Path -Name $Name -PropertyType DWord -Value $Value -Force | Out-Null
+    if (-not (Ensure-RegistryKeyExistsMain -Path $Path)) {
+        return $false
+    }
+
+    try {
+        New-ItemProperty -Path $Path -Name $Name -PropertyType DWord -Value $Value -Force -ErrorAction Stop | Out-Null
+        return $true
+    }
+    catch {
+        Write-Warning "Could not set ${Path}\${Name} with PowerShell. Trying reg.exe fallback. $($_.Exception.Message)"
+        $regPath = Convert-RegistryPathForRegExeMain -Path $Path
+        & reg.exe add $regPath /v $Name /t REG_DWORD /d $Value /f | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            return $true
+        }
+        Write-Warning "Could not set ${Path}\${Name}; skipping. reg.exe exit code: $LASTEXITCODE"
+        return $false
+    }
 }
 
 function Set-RegistryStringValue {
@@ -673,8 +717,24 @@ function Set-RegistryStringValue {
         [Parameter(Mandatory)][string]$Value
     )
 
-    New-Item -Path $Path -Force | Out-Null
-    New-ItemProperty -Path $Path -Name $Name -PropertyType String -Value $Value -Force | Out-Null
+    if (-not (Ensure-RegistryKeyExistsMain -Path $Path)) {
+        return $false
+    }
+
+    try {
+        New-ItemProperty -Path $Path -Name $Name -PropertyType String -Value $Value -Force -ErrorAction Stop | Out-Null
+        return $true
+    }
+    catch {
+        Write-Warning "Could not set ${Path}\${Name} with PowerShell. Trying reg.exe fallback. $($_.Exception.Message)"
+        $regPath = Convert-RegistryPathForRegExeMain -Path $Path
+        & reg.exe add $regPath /v $Name /t REG_SZ /d $Value /f | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            return $true
+        }
+        Write-Warning "Could not set ${Path}\${Name}; skipping. reg.exe exit code: $LASTEXITCODE"
+        return $false
+    }
 }
 
 function Set-TaskbarPreferencesInRegistryRoot {
@@ -852,7 +912,7 @@ function Configure-MachineActiveContentPolicies {
     $systemPolicy = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\System"
     $null = Set-RegistryDWordValue -Path $systemPolicy -Name "EnableCdp" -Value 0
 
-    Write-Host "Machine active-content policies applied. Per-user cleanup is staged for first logon."
+    Write-Host "Machine active-content policies attempted. Locked policy keys are skipped; per-user cleanup is staged separately."
 }
 
 
@@ -2563,9 +2623,12 @@ function Repair-SystemIconFontsAndCaches {
     $fontRegistryPath = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts"
     New-Item -Path $fontRegistryPath -Force | Out-Null
 
-    $systemIconFonts = @{
-        "Segoe MDL2 Assets (TrueType)" = "segmdl2.ttf"
+    # Windows shell glyphs such as Start, power, Wi-Fi, battery, taskbar symbols, and flyout icons
+    # depend on these Segoe icon fonts. If these registrations are wrong or substituted,
+    # the shell renders square placeholder boxes.
+    $systemIconFonts = [ordered]@{
         "Segoe Fluent Icons (TrueType)" = "SegoeIcons.ttf"
+        "Segoe MDL2 Assets (TrueType)" = "segmdl2.ttf"
         "Segoe UI Symbol (TrueType)" = "seguisym.ttf"
         "Segoe UI Emoji (TrueType)" = "seguiemj.ttf"
     }
@@ -2576,10 +2639,20 @@ function Repair-SystemIconFontsAndCaches {
         if (Test-Path $fontPath) {
             try {
                 New-ItemProperty -Path $fontRegistryPath -Name $fontName -PropertyType String -Value $fontFile -Force | Out-Null
+                & reg.exe add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts" /v $fontName /t REG_SZ /d $fontFile /f | Out-Null
                 Write-Host "Verified system icon font registration: $fontName -> $fontFile"
             }
             catch {
                 Write-Warning "Could not register system icon font ${fontName}: $($_.Exception.Message)"
+            }
+
+            # Ask Windows Resource Protection to verify the actual font file if it is available.
+            try {
+                $sfc = Start-Process -FilePath "sfc.exe" -ArgumentList "/scanfile=`"$fontPath`"" -Wait -PassThru -WindowStyle Hidden -ErrorAction SilentlyContinue
+                if ($sfc) { Write-Host "SFC scanfile for $fontFile exited with code $($sfc.ExitCode)." }
+            }
+            catch {
+                Write-Warning "Could not run SFC scanfile for ${fontFile}: $($_.Exception.Message)"
             }
         }
         else {
@@ -2587,26 +2660,72 @@ function Repair-SystemIconFontsAndCaches {
         }
     }
 
-    # A bad font substitution for these icon fonts causes shell icons such as Start/power/taskbar glyphs to render as squares.
+    # Remove user/machine font substitutions that can redirect Segoe/icon fonts to another family.
+    # This is the common reason Windows shell glyphs turn into empty square boxes.
     $fontSubstitutePaths = @(
         "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\FontSubstitutes",
         "HKCU:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\FontSubstitutes"
     )
-    $protectedIconFontNames = @("Segoe MDL2 Assets", "Segoe Fluent Icons", "Segoe UI Symbol", "Segoe UI Emoji")
+
+    $substituteNamesToRemove = @(
+        "Segoe Fluent Icons",
+        "Segoe MDL2 Assets",
+        "Segoe UI Symbol",
+        "Segoe UI Emoji",
+        "Segoe UI",
+        "Segoe UI Black",
+        "Segoe UI Black Italic",
+        "Segoe UI Bold",
+        "Segoe UI Bold Italic",
+        "Segoe UI Historic",
+        "Segoe UI Italic",
+        "Segoe UI Light",
+        "Segoe UI Light Italic",
+        "Segoe UI Semibold",
+        "Segoe UI Semibold Italic",
+        "Segoe UI Semilight",
+        "Segoe UI Semilight Italic",
+        "Segoe UI Variable",
+        "Segoe UI Variable Display",
+        "Segoe UI Variable Small",
+        "Segoe UI Variable Text"
+    )
+
     foreach ($subPath in $fontSubstitutePaths) {
-        if (Test-Path $subPath) {
-            foreach ($fontName in $protectedIconFontNames) {
-                try {
-                    Remove-ItemProperty -Path $subPath -Name $fontName -ErrorAction SilentlyContinue
-                }
-                catch {
-                    Write-Warning "Could not remove possible font substitute ${subPath}\${fontName}: $($_.Exception.Message)"
-                }
+        if (-not (Test-Path $subPath)) {
+            New-Item -Path $subPath -Force -ErrorAction SilentlyContinue | Out-Null
+        }
+
+        foreach ($fontName in $substituteNamesToRemove) {
+            try {
+                Remove-ItemProperty -Path $subPath -Name $fontName -ErrorAction SilentlyContinue
+                $regPath = $subPath -replace '^HKLM:\', 'HKLM\' -replace '^HKCU:\', 'HKCU\'
+                & reg.exe delete $regPath /v $fontName /f 2>$null | Out-Null
+            }
+            catch {
+                Write-Warning "Could not remove possible font substitute ${subPath}\${fontName}: $($_.Exception.Message)"
             }
         }
     }
 
-    # Clear FontCache and Explorer icon caches. These files are regenerated by Windows.
+    # Preserve the normal shell dialog font substitutions.
+    try {
+        New-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\FontSubstitutes" -Name "MS Shell Dlg" -PropertyType String -Value "Microsoft Sans Serif" -Force | Out-Null
+        New-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\FontSubstitutes" -Name "MS Shell Dlg 2" -PropertyType String -Value "Tahoma" -Force | Out-Null
+    }
+    catch {
+        Write-Warning "Could not restore MS Shell Dlg font substitutions: $($_.Exception.Message)"
+    }
+
+    # Stop shell processes that hold icon/font caches open. They restart automatically or after Explorer restart.
+    foreach ($processName in @("StartMenuExperienceHost", "ShellExperienceHost", "SearchHost", "TextInputHost", "Widgets", "explorer")) {
+        try {
+            Get-Process -Name $processName -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+        }
+        catch { }
+    }
+
+    # Clear FontCache and Explorer icon/thumb caches. These files are regenerated by Windows.
     try { sc.exe stop FontCache | Out-Null } catch { }
     try { Stop-Service -Name FontCache -Force -ErrorAction SilentlyContinue } catch { }
 
@@ -2615,7 +2734,8 @@ function Repair-SystemIconFontsAndCaches {
         "$env:WINDIR\System32\FNTCACHE.DAT",
         "$env:LOCALAPPDATA\IconCache.db",
         "$env:LOCALAPPDATA\Microsoft\Windows\Explorer\iconcache*.db",
-        "$env:LOCALAPPDATA\Microsoft\Windows\Explorer\thumbcache*.db"
+        "$env:LOCALAPPDATA\Microsoft\Windows\Explorer\thumbcache*.db",
+        "$env:LOCALAPPDATA\Microsoft\Windows\Explorer\ExplorerStartupLog*.etl"
     )
 
     foreach ($cachePath in $cachePaths) {
@@ -2628,7 +2748,24 @@ function Repair-SystemIconFontsAndCaches {
     }
 
     try { sc.exe start FontCache | Out-Null } catch { }
-    Write-Host "System icon font registrations and caches were refreshed. A sign-out/sign-in or reboot may be required if square glyphs are still visible."
+
+    try {
+Add-Type -ErrorAction SilentlyContinue @"
+using System;
+using System.Runtime.InteropServices;
+public class FontRefreshToolsV34 {
+    [DllImport("user32.dll", SetLastError=true, CharSet=CharSet.Auto)]
+    public static extern IntPtr SendMessageTimeout(IntPtr hWnd, uint Msg, UIntPtr wParam, string lParam, uint fuFlags, uint uTimeout, out UIntPtr lpdwResult);
+}
+"@
+        $result = [UIntPtr]::Zero
+        [FontRefreshToolsV34]::SendMessageTimeout([IntPtr]0xffff, 0x001D, [UIntPtr]::Zero, $null, 0x0002, 5000, [ref]$result) | Out-Null
+    }
+    catch {
+        Write-Warning "Could not broadcast font refresh message: $($_.Exception.Message)"
+    }
+
+    Write-Host "System icon font registrations, font substitutions, and shell caches were refreshed. Reboot is strongly recommended if square glyphs are still visible."
 }
 
 function Configure-ScreenSaverAndPower {
