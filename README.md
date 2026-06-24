@@ -1,4 +1,4 @@
-# Prepare-LocalAdminMachine-v32.ps1
+# Prepare-LocalAdminMachine-v33.ps1
 
 PowerShell provisioning script for preparing a Windows computer for a local `retreat`-style administrator/autologon user profile.
 
@@ -11,50 +11,33 @@ This script is designed for kiosk, presentation, event, retreat, or shared-use m
 ## Current version
 
 ```text
-Prepare-LocalAdminMachine-v32.ps1
+Prepare-LocalAdminMachine-v33.ps1
 ```
 
 Matching README:
 
 ```text
-README-Prepare-LocalAdminMachine-v32.md
+README-Prepare-LocalAdminMachine-v33.md
 ```
 
 ---
 
-## v32 retreat-folder correction
+## v33 system icon font repair
 
-Version v32 addresses the latest cleanup pass:
+Version v33 addresses the Start menu/taskbar square-glyph issue seen after the Roboto/font and shell customization passes:
 
-- Keeps provisioning-generated/staged files under `C:\Temp` instead of `C:\ProgramData\DeltaProvisioning`.
-- Stages user-context Spotify through an HKCU `RunOnce` value that points to a command file stored under `C:\Temp\DeltaProvisioning`.
-- Keeps the retreat working folder at `C:\retreat`, while provisioning logs/support files remain under `C:\Temp`.
-- Updates the File Explorer shortcut target to open `C:\retreat`.
-- Fixes the wallpaper reapply path bug that could produce an illegal path such as `C:\Tempetreat-system-info-wallpaper.jpg`.
-- Updates the wallpaper design:
-  - removes the `Retreat Computer` heading,
-  - removes the background box/panel,
-  - moves system information toward the lower-right of the screen,
-  - reduces the text size by roughly one third.
-- Updates Roboto download logic to resolve the latest GitHub release package before falling back to a pinned release asset.
+- Re-registers the Windows shell icon fonts:
+  - Segoe MDL2 Assets
+  - Segoe Fluent Icons
+  - Segoe UI Symbol
+  - Segoe UI Emoji
+- Removes bad font-substitution entries for those icon fonts if present.
+- Clears Windows font caches and Explorer icon/thumb caches so taskbar, Start menu, and power-button icons can rebuild.
+- Keeps Roboto installation for the generated wallpaper.
+- Keeps the retreat working folder at `C:\retreat`.
+- Keeps generated/staged provisioning artifacts under `C:\Temp` and `C:\Temp\DeltaProvisioning`.
 
-The generated wallpaper path is:
-
-```text
-C:\Temp\retreat-system-info-wallpaper-v32.jpg
-```
-
-The user-context log path is:
-
-```text
-C:\Temp\first-logon-<username>.log
-```
-
-Provisioning support files are staged under:
-
-```text
-C:\Temp\DeltaProvisioning
-```
+A sign-out/sign-in or reboot may still be required because Explorer and Start cache icon font glyphs aggressively.
 
 ---
 
@@ -64,7 +47,7 @@ C:\Temp\DeltaProvisioning
 Set-ExecutionPolicy Bypass -Scope Process -Force
 
 powershell.exe -NoProfile -ExecutionPolicy Bypass `
-  -File "$env:USERPROFILE\Downloads\Prepare-LocalAdminMachine-v32.ps1" `
+  -File "$env:USERPROFILE\Downloads\Prepare-LocalAdminMachine-v33.ps1" `
   -LocalAdminUser "retreat" `
   -LocalAdminPassword "YourPasswordHere"
 ```
@@ -75,7 +58,7 @@ With a computer rename:
 Set-ExecutionPolicy Bypass -Scope Process -Force
 
 powershell.exe -NoProfile -ExecutionPolicy Bypass `
-  -File "$env:USERPROFILE\Downloads\Prepare-LocalAdminMachine-v32.ps1" `
+  -File "$env:USERPROFILE\Downloads\Prepare-LocalAdminMachine-v33.ps1" `
   -LocalAdminUser "retreat" `
   -LocalAdminPassword "YourPasswordHere" `
   -NewComputerName "RETREAT-001"
@@ -87,7 +70,7 @@ Optional domain-unjoin credential:
 $cred = Get-Credential
 
 powershell.exe -NoProfile -ExecutionPolicy Bypass `
-  -File "$env:USERPROFILE\Downloads\Prepare-LocalAdminMachine-v32.ps1" `
+  -File "$env:USERPROFILE\Downloads\Prepare-LocalAdminMachine-v33.ps1" `
   -LocalAdminUser "retreat" `
   -LocalAdminPassword "YourPasswordHere" `
   -DomainUnjoinCredential $cred
@@ -136,7 +119,7 @@ The script may create the following files and folders:
 C:\retreat
 C:\Temp\first-logon-<username>.log
 C:\Temp\retreat-computer-name.txt
-C:\Temp\retreat-system-info-wallpaper-v32.jpg
+C:\Temp\retreat-system-info-wallpaper-v33.jpg
 C:\Temp\RobotoFontInstall\
 C:\Temp\DeltaProvisioning\FirstLogon-For-<username>.ps1
 C:\Temp\DeltaProvisioning\TaskbarLayout-<username>.xml
@@ -384,7 +367,7 @@ Attempts to disable or hide:
 Generates a static desktop wallpaper at:
 
 ```text
-C:\Temp\retreat-system-info-wallpaper-v32.jpg
+C:\Temp\retreat-system-info-wallpaper-v33.jpg
 ```
 
 The wallpaper includes:
@@ -489,7 +472,7 @@ Get-Content C:\Temp\retreat-computer-name.txt -ErrorAction SilentlyContinue
 ### Confirm wallpaper file
 
 ```powershell
-Test-Path C:\Temp\retreat-system-info-wallpaper-v32.jpg
+Test-Path C:\Temp\retreat-system-info-wallpaper-v33.jpg
 ```
 
 ### Confirm Roboto fonts
@@ -499,7 +482,7 @@ Get-ChildItem C:\Windows\Fonts\Roboto* -ErrorAction SilentlyContinue |
     Select-Object Name, Length
 ```
 
-v32 does not skip Roboto installation merely because the `Roboto` family name exists. It checks for a complete variable-font pair or the core static weights before considering the family complete.
+v33 does not skip Roboto installation merely because the `Roboto` family name exists. It checks for a complete variable-font pair or the core static weights before considering the family complete.
 
 ### Check first-logon/user-context log
 
@@ -526,17 +509,17 @@ Select-Object DisplayName, DisplayVersion, Publisher
 When this script is iterated, keep the script and README versions in sync. For example:
 
 ```text
-Prepare-LocalAdminMachine-v32.ps1
-README-Prepare-LocalAdminMachine-v32.md
+Prepare-LocalAdminMachine-v33.ps1
+README-Prepare-LocalAdminMachine-v33.md
 ```
 
 
-## v32 notes
+## v33 notes
 
-If the wallpaper still does not show after running v32, check:
+If the wallpaper still does not show after running v33, check:
 
 ```powershell
-Test-Path C:\Temp\retreat-system-info-wallpaper-v32.jpg
+Test-Path C:\Temp\retreat-system-info-wallpaper-v33.jpg
 Get-Content C:\Temp\first-logon-retreat.log -Tail 80
 reg query "HKCU\Control Panel\Desktop" /v Wallpaper
 reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\Policies\System" /v Wallpaper
@@ -547,15 +530,15 @@ A sign out/sign in or reboot may still be needed on some Windows 11 builds if Ex
 
 ## Version Notes
 
-### v32
+### v33
 
 - Removed IP address from the generated system-information wallpaper.
 
 
-## v32 note
+## v33 note
 
-The generated wallpaper intentionally excludes IP address information. v32 also deletes the previous generated wallpaper file before rendering a fresh image so an older wallpaper with IP information is not reused.
+The generated wallpaper intentionally excludes IP address information. v33 also deletes the previous generated wallpaper file before rendering a fresh image so an older wallpaper with IP information is not reused.
 
-## v32 wallpaper cache-busting note
+## v33 wallpaper cache-busting note
 
-v32 changes the generated wallpaper file to `C:\Temp\retreat-system-info-wallpaper-v32.jpg`, removes older `retreat-system-info-wallpaper*.jpg` files from `C:\Temp`, and clears the current user's Windows wallpaper cache under `%APPDATA%\Microsoft\Windows\Themes`. This prevents Windows from continuing to display an older cached wallpaper that still included IP address information.
+v33 changes the generated wallpaper file to `C:\Temp\retreat-system-info-wallpaper-v33.jpg`, removes older `retreat-system-info-wallpaper*.jpg` files from `C:\Temp`, and clears the current user's Windows wallpaper cache under `%APPDATA%\Microsoft\Windows\Themes`. This prevents Windows from continuing to display an older cached wallpaper that still included IP address information.
